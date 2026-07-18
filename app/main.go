@@ -1,29 +1,56 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
-	"os"
 )
 
-// Ensures gofmt doesn't remove the "net" and "os" imports in stage 1 (feel free to remove this!)
-var _ = net.Listen
-var _ = os.Exit
+func handleClient(conn net.Conn, store *Store) {
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+	writer := bufio.NewWriter(conn)
+	handler := CommandHandler{store: store}
+
+	defer func() {
+		fmt.Printf("Client disconnected: %s\n", conn.RemoteAddr())
+	}()
+
+	for {
+		parts, err := ParseArray(reader)
+		if err != nil {
+			if err.Error() != "EOF" {
+				fmt.Printf("Error received %s: %v\n", conn.LocalAddr(), err)
+			}
+			return
+		}
+
+		if _, err := writer.WriteString(handler.Handle(ParseCommand(parts))); err != nil {
+			fmt.Printf("Error writing to %s: %v\n", conn.RemoteAddr(), err)
+			return
+		}
+		if err := writer.Flush(); err != nil {
+			fmt.Printf("Error flushing to %s: %v\n", conn.RemoteAddr(), err)
+			return
+		}
+	}
+}
 
 func main() {
-	// You can use print statements as follows for debugging, they'll be visible when running tests.
-	fmt.Println("Logs from your program will appear here!")
+	listener, err := net.Listen("tcp", ":6379")
+	if err != nil {
+		panic(err)
+	}
+	defer listener.Close()
 
-	// Uncomment the code below to pass the first stage
-	//
-	// l, err := net.Listen("tcp", "0.0.0.0:6379")
-	// if err != nil {
-	// 	fmt.Println("Failed to bind to port 6379")
-	// 	os.Exit(1)
-	// }
-	// _, err = l.Accept()
-	// if err != nil {
-	// 	fmt.Println("Error accepting connection: ", err.Error())
-	// 	os.Exit(1)
-	// }
+	store := NewStore()
+	for {
+		conn, err := listener.Accept()
+		if err != nil {
+			fmt.Printf("Error accepting client: %v\n", err)
+			continue
+		}
+		go handleClient(conn, store)
+	}
 }

@@ -1,0 +1,314 @@
+package main
+
+import (
+	"fmt"
+	"time"
+)
+
+const wrongType = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+
+type CommandHandler struct {
+	store *Store
+}
+
+func (h CommandHandler) Handle(command Command) string {
+	switch cmd := command.(type) {
+	case Ping:
+		return "+PONG\r\n"
+	case Echo:
+		return BulkString(cmd.Message)
+	case Get:
+		return h.handleGet(cmd)
+	case Set:
+		return h.handleSet(cmd)
+	case RPush:
+		return h.handleRPush(cmd)
+	case LPush:
+		return h.handleLPush(cmd)
+	case LLen:
+		return h.handleLLen(cmd)
+	case LPop:
+		return h.handleLPop(cmd)
+	case RPop:
+		return h.handleRPop(cmd)
+	case LRange:
+		return h.handleLRange(cmd)
+	case BLPop:
+		return h.handleBLPop(cmd)
+	case Unknown:
+		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd.Name)
+	default:
+		return "-ERR unknown command\r\n"
+	}
+}
+
+func (h CommandHandler) handleGet(cmd Get) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists || (entry.Expiry != nil && entry.Expiry.Before(time.Now())) {
+		if exists {
+			delete(h.store.db, cmd.Key)
+		}
+		return "$-1\r\n"
+	}
+	if value, ok := entry.Value.(StringValue); ok {
+		return BulkString(value.Value)
+	}
+	return wrongType
+}
+
+func (h CommandHandler) handleSet(cmd Set) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
+	return "+OK\r\n"
+}
+
+func (h CommandHandler) handleRPush(cmd RPush) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		entry = Entry{Value: ListValue{}}
+	}
+	list, ok := entry.Value.(ListValue)
+	if !ok {
+		return wrongType
+	}
+	list.Values = append(list.Values, cmd.Values...)
+	entry.Value = list
+	h.store.db[cmd.Key] = entry
+	h.notifyWaiters(cmd.Key)
+	return fmt.Sprintf(":%d\r\n", len(list.Values))
+}
+
+func (h CommandHandler) handleLPush(cmd LPush) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		entry = Entry{Value: ListValue{}}
+	}
+	list, ok := entry.Value.(ListValue)
+	if !ok {
+		return wrongType
+	}
+	for _, value := range cmd.Values {
+		list.Values = append([]string{value}, list.Values...)
+	}
+	entry.Value = list
+	h.store.db[cmd.Key] = entry
+	h.notifyWaiters(cmd.Key)
+	return fmt.Sprintf(":%d\r\n", len(list.Values))
+}
+
+func (h CommandHandler) handleLLen(cmd LLen) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		return ":0\r\n"
+	}
+	if list, ok := entry.Value.(ListValue); ok {
+		return fmt.Sprintf(":%d\r\n", len(list.Values))
+	}
+	return wrongType
+}
+
+func (h CommandHandler) handleLPop(cmd LPop) string { return h.handlePop(cmd.Key, cmd.Count, true) }
+func (h CommandHandler) handleRPop(cmd RPop) string { return h.handlePop(cmd.Key, cmd.Count, false) }
+
+func (h CommandHandler) handlePop(key string, count *int, fromLeft bool) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[key]
+	if !exists {
+		if count == nil {
+			return "$-1\r\n"
+		}
+		return "*0\r\n"
+	}
+	list, ok := entry.Value.(ListValue)
+	if !ok {
+		return wrongType
+	}
+	if count == nil {
+		if len(list.Values) == 0 {
+			return "$-1\r\n"
+		}
+		var item string
+		if fromLeft {
+			item, list.Values = list.Values[0], list.Values[1:]
+		} else {
+			last := len(list.Values) - 1
+			item, list.Values = list.Values[last], list.Values[:last]
+		}
+		entry.Value = list
+		h.store.db[key] = entry
+		return BulkString(item)
+	}
+
+	items := make([]string, 0, *count)
+	for range *count {
+		if len(list.Values) == 0 {
+			break
+		}
+		if fromLeft {
+			items = append(items, list.Values[0])
+			list.Values = list.Values[1:]
+		} else {
+			last := len(list.Values) - 1
+			items = append(items, list.Values[last])
+			list.Values = list.Values[:last]
+		}
+	}
+	entry.Value = list
+	h.store.db[key] = entry
+	return buildArray(items)
+}
+
+func (h CommandHandler) handleLRange(cmd LRange) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		return "*0\r\n"
+	}
+	list, ok := entry.Value.(ListValue)
+	if !ok {
+		return wrongType
+	}
+	size := len(list.Values)
+	start, end := cmd.Start, cmd.End
+	if start < 0 {
+		start = max(size+start, 0)
+	}
+	if end < 0 {
+		end = min(size+end, size-1)
+	} else {
+		end = min(end, size-1)
+	}
+	if size == 0 || start > end {
+		return "*0\r\n"
+	}
+	return buildArray(list.Values[start : end+1])
+}
+
+func (h CommandHandler) handleBLPop(cmd BLPop) string {
+	h.store.mu.Lock()
+	for _, key := range cmd.Keys {
+		if entry, exists := h.store.db[key]; exists {
+			if list, ok := entry.Value.(ListValue); ok && len(list.Values) > 0 {
+				item := list.Values[0]
+				list.Values = list.Values[1:]
+				entry.Value = list
+				h.store.db[key] = entry
+				h.store.mu.Unlock()
+				return popResponse(key, item)
+			}
+		}
+	}
+
+	w := &waiter{result: make(chan popResult, 1), active: true}
+	for _, key := range cmd.Keys {
+		h.store.waiters[key] = append(h.store.waiters[key], w)
+	}
+	h.store.mu.Unlock()
+
+	if cmd.Timeout == 0 {
+		result := <-w.result
+		return popResponse(result.key, result.item)
+	}
+
+	select {
+	case result := <-w.result:
+		return popResponse(result.key, result.item)
+	case <-time.After(time.Duration(cmd.Timeout * float64(time.Second))):
+		h.removeWaiter(w)
+		return "*-1\r\n"
+	}
+}
+
+// notifyWaiters is called while store.mu is held.
+func (h CommandHandler) notifyWaiters(key string) {
+	for len(h.store.waiters[key]) > 0 {
+		entry, exists := h.store.db[key]
+		if !exists {
+			return
+		}
+		list, ok := entry.Value.(ListValue)
+		if !ok || len(list.Values) == 0 {
+			return
+		}
+
+		w := h.store.waiters[key][0]
+		h.store.waiters[key] = h.store.waiters[key][1:]
+		if !w.active {
+			continue
+		}
+		w.active = false
+		h.removeWaiterLocked(w)
+		item := list.Values[0]
+		list.Values = list.Values[1:]
+		entry.Value = list
+		h.store.db[key] = entry
+		w.result <- popResult{key: key, item: item}
+		return
+	}
+}
+
+func (h CommandHandler) removeWaiter(w *waiter) {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	if w.active {
+		w.active = false
+		h.removeWaiterLocked(w)
+	}
+}
+
+// removeWaiterLocked removes a waiter from every list it was waiting on.
+func (h CommandHandler) removeWaiterLocked(w *waiter) {
+	for key, waiters := range h.store.waiters {
+		for i := 0; i < len(waiters); {
+			if waiters[i] == w {
+				waiters = append(waiters[:i], waiters[i+1:]...)
+				continue
+			}
+			i++
+		}
+		if len(waiters) == 0 {
+			delete(h.store.waiters, key)
+		} else {
+			h.store.waiters[key] = waiters
+		}
+	}
+}
+
+func buildArray(items []string) string {
+	response := fmt.Sprintf("*%d\r\n", len(items))
+	for _, item := range items {
+		response += BulkString(item)
+	}
+	return response
+}
+
+func popResponse(key, item string) string { return buildArray([]string{key, item}) }
+func min(left, right int) int {
+	if left < right {
+		return left
+	}
+	return right
+}
+func max(left, right int) int {
+	if left > right {
+		return left
+	}
+	return right
+}
