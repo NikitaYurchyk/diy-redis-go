@@ -203,23 +203,20 @@ func (h CommandHandler) handleLRange(cmd LRange) string {
 
 func (h CommandHandler) handleBLPop(cmd BLPop) string {
 	h.store.mu.Lock()
-	for _, key := range cmd.Keys {
-		if entry, exists := h.store.db[key]; exists {
-			if list, ok := entry.Value.(ListValue); ok && len(list.Values) > 0 {
-				item := list.Values[0]
-				list.Values = list.Values[1:]
-				entry.Value = list
-				h.store.db[key] = entry
-				h.store.mu.Unlock()
-				return popResponse(key, item)
-			}
+	if entry, exists := h.store.db[cmd.Key]; exists {
+		if list, ok := entry.Value.(ListValue); ok && len(list.Values) > 0 {
+			item := list.Values[0]
+			list.Values = list.Values[1:]
+			entry.Value = list
+			h.store.db[cmd.Key] = entry
+			h.store.mu.Unlock()
+			return popResponse(cmd.Key, item)
 		}
 	}
 
+
 	w := &waiter{result: make(chan popResult, 1), active: true}
-	for _, key := range cmd.Keys {
-		h.store.waiters[key] = append(h.store.waiters[key], w)
-	}
+	h.store.waiters[cmd.Key] = append(h.store.waiters[cmd.Key], w)
 	h.store.mu.Unlock()
 
 	if cmd.Timeout == 0 {

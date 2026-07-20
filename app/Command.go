@@ -39,7 +39,7 @@ type LRange struct {
 	Start, End int
 }
 type BLPop struct {
-	Keys    []string
+	Key    string
 	Timeout float64
 }
 type Unknown struct{ Name string }
@@ -80,7 +80,7 @@ func ParseCommand(parts []string) Command {
 	case "LRANGE":
 		return LRange{Key: parts[1], Start: parseInt(parts[2]), End: parseInt(parts[3])}
 	case "BLPOP":
-		return BLPop{Keys: parts[1 : len(parts)-1], Timeout: parseFloat(parts[len(parts)-1])}
+		return BLPop{Key: parts[1], Timeout: parseFloat(parts[len(parts)-1])}
 	default:
 		return Unknown{Name: parts[0]}
 	}
