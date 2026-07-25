@@ -37,6 +37,8 @@ func (h CommandHandler) Handle(command Command) string {
 		return h.handleLRange(cmd)
 	case BLPop:
 		return h.handleBLPop(cmd)
+	case Xadd:
+		return h.handleXadd(cmd)
 	case Unknown:
 		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd.Name)
 	default:
@@ -78,6 +80,8 @@ func (h CommandHandler) handleType(cmd Type) string {
 		return "+string\r\n"
 	case ListValue:
 		return "+list\r\n"
+	case StreamValue:
+		return "+stream\r\n"
 	default:
 		return "+none\r\n"
 	}
@@ -109,6 +113,24 @@ func (h CommandHandler) handleRPush(cmd RPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
+func (h CommandHandler) handleXadd(cmd Xadd) string{
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists{
+		entry = Entry{Value: StreamValue{}}
+	}
+	stream, ok := entry.Value.(StreamValue)
+	if !ok{
+		return wrongType
+	}
+	stream.Value = append(stream.Value, cmd.Values...)
+	entry.Value = stream
+	h.store.db[cmd.Key] = entry
+	return BulkString(cmd.Values[0])
+
+}
 func (h CommandHandler) handleLPush(cmd LPush) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()

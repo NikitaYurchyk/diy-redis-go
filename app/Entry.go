@@ -11,9 +11,10 @@ type RedisValue interface {
 
 type StringValue struct{ Value string }
 type ListValue struct{ Values []string }
-
+type StreamValue struct{Value []string}
 func (StringValue) isRedisValue() {}
 func (ListValue) isRedisValue()   {}
+func (StreamValue) isRedisValue() {}
 
 type Entry struct {
 	Value  RedisValue
