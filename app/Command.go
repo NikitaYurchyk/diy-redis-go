@@ -13,6 +13,7 @@ type Command interface {
 type Ping struct{}
 type Echo struct{ Message string }
 type Get struct{ Key string }
+type Type struct{ Key string }
 type Set struct {
 	Key, Value string
 	Expiry     *time.Time
@@ -39,7 +40,7 @@ type LRange struct {
 	Start, End int
 }
 type BLPop struct {
-	Key    string
+	Key     string
 	Timeout float64
 }
 type Unknown struct{ Name string }
@@ -47,6 +48,7 @@ type Unknown struct{ Name string }
 func (Ping) isCommand()    {}
 func (Echo) isCommand()    {}
 func (Get) isCommand()     {}
+func (Type) isCommand()    {}
 func (Set) isCommand()     {}
 func (RPush) isCommand()   {}
 func (LPush) isCommand()   {}
@@ -65,6 +67,8 @@ func ParseCommand(parts []string) Command {
 		return Echo{Message: parts[1]}
 	case "GET":
 		return Get{Key: parts[1]}
+	case "TYPE":
+		return Type{Key: parts[1]}
 	case "SET":
 		return Set{Key: parts[1], Value: parts[2], Expiry: parseExpiry(parts)}
 	case "RPUSH":

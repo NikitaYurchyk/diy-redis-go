@@ -19,6 +19,8 @@ func (h CommandHandler) Handle(command Command) string {
 		return BulkString(cmd.Message)
 	case Get:
 		return h.handleGet(cmd)
+	case Type:
+		return h.handleType(cmd)
 	case Set:
 		return h.handleSet(cmd)
 	case RPush:
@@ -57,6 +59,28 @@ func (h CommandHandler) handleGet(cmd Get) string {
 		return BulkString(value.Value)
 	}
 	return wrongType
+}
+
+func (h CommandHandler) handleType(cmd Type) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists || (entry.Expiry != nil && entry.Expiry.Before(time.Now())) {
+		if exists {
+			delete(h.store.db, cmd.Key)
+		}
+		return "+none\r\n"
+	}
+
+	switch entry.Value.(type) {
+	case StringValue:
+		return "+string\r\n"
+	case ListValue:
+		return "+list\r\n"
+	default:
+		return "+none\r\n"
+	}
 }
 
 func (h CommandHandler) handleSet(cmd Set) string {
@@ -213,7 +237,6 @@ func (h CommandHandler) handleBLPop(cmd BLPop) string {
 			return popResponse(cmd.Key, item)
 		}
 	}
-
 
 	w := &waiter{result: make(chan popResult, 1), active: true}
 	h.store.waiters[cmd.Key] = append(h.store.waiters[cmd.Key], w)
