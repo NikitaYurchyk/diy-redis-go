@@ -2,6 +2,10 @@ package main
 
 import (
 	"fmt"
+	"strconv"
+	"strings"
+
+	// "strings"
 	"time"
 )
 
@@ -113,24 +117,109 @@ func (h CommandHandler) handleRPush(cmd RPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
-func (h CommandHandler) handleXadd(cmd Xadd) string{
+func generateStreamID(requested string, last *StreamID) (StreamID, error) {
+
+	if requested == "*" {
+		now := time.Now().UnixMilli()
+
+		if last != nil && now <= last.Millis {
+			return StreamID{
+				Millis: last.Millis,
+				Seq:    last.Seq + 1,
+			}, nil
+		}
+
+		return StreamID{
+			Millis: now,
+			Seq:    0,
+		}, nil
+	}
+
+	parts := strings.SplitN(requested, "-", 2)
+	if len(parts) != 2 {
+		return StreamID{}, fmt.Errorf("invalid stream ID")
+	}
+
+	millis, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return StreamID{}, fmt.Errorf("invalid stream ID")
+	}
+
+	if parts[1] == "*" {
+		if last != nil {
+			if millis < last.Millis {
+				return StreamID{}, fmt.Errorf("The ID specified in XADD is equal or smaller than the target stream top item")
+			}
+
+			if millis == last.Millis {
+				return StreamID{
+					Millis: millis,
+					Seq:    last.Seq + 1,
+				}, nil
+			}
+		}
+
+		return StreamID{
+			Millis: millis,
+			Seq:    0,
+		}, nil
+	}
+
+	seq, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return StreamID{}, fmt.Errorf("invalid stream ID")
+	}
+
+	id := StreamID{Millis: millis, Seq: seq}
+	if id.Millis == 0 && id.Seq == 0 {
+		return StreamID{}, fmt.Errorf("The ID specified in XADD must be greater than 0-0")
+	}
+
+	if last != nil &&
+		(id.Millis < last.Millis ||
+			(id.Millis == last.Millis && id.Seq <= last.Seq)) {
+		return StreamID{}, fmt.Errorf("The ID specified in XADD is equal or smaller than the target stream top item")
+	}
+
+	return id, nil
+}
+
+func (h CommandHandler) handleXadd(cmd Xadd) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
 	entry, exists := h.store.db[cmd.Key]
-	if !exists{
+	if !exists {
 		entry = Entry{Value: StreamValue{}}
 	}
+
 	stream, ok := entry.Value.(StreamValue)
-	if !ok{
+	if !ok {
 		return wrongType
 	}
-	stream.Value = append(stream.Value, cmd.Values...)
+
+	var last *StreamID
+	if len(stream.Entries) > 0 {
+		last = &stream.Entries[len(stream.Entries)-1].ID
+	}
+
+	id, err := generateStreamID(cmd.ID, last)
+	if err != nil {
+		return fmt.Sprintf("-ERR %s\r\n", err)
+	}
+
+	stream.Entries = append(stream.Entries, StreamEntry{
+		ID:     id,
+		Fields: cmd.Fields,
+	})
+
 	entry.Value = stream
 	h.store.db[cmd.Key] = entry
-	return BulkString(cmd.Values[0])
 
+	idString := fmt.Sprintf("%d-%d", id.Millis, id.Seq)
+	return BulkString(idString)
 }
+
 func (h CommandHandler) handleLPush(cmd LPush) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()

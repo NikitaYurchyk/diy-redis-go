@@ -9,10 +9,13 @@ import (
 type Command interface {
 	isCommand()
 }
+
 type Xadd struct {
 	Key    string
-	Values []string
+	ID 	   string
+	Fields []string
 }
+
 type Ping struct{}
 type Echo struct{ Message string }
 type Get struct{ Key string }
@@ -48,6 +51,7 @@ type BLPop struct {
 }
 type Unknown struct{ Name string }
 
+
 func (Xadd) isCommand()    {}
 func (Ping) isCommand()    {}
 func (Echo) isCommand()    {}
@@ -66,7 +70,7 @@ func (Unknown) isCommand() {}
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
 	case "XADD":
-		return Xadd{Key: parts[1], Values: parts[2:]}
+		return Xadd{Key: parts[1], ID: parts[2], Fields: parts[3:]}
 	case "PING":
 		return Ping{}
 	case "ECHO":

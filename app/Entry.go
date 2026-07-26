@@ -9,9 +9,23 @@ type RedisValue interface {
 	isRedisValue()
 }
 
+type StreamID struct {
+	Millis int64
+	Seq    int64
+}
+
+type StreamEntry struct {
+	ID     StreamID
+	Fields []string
+}
+
+type StreamValue struct {
+	Entries []StreamEntry
+}
+
 type StringValue struct{ Value string }
 type ListValue struct{ Values []string }
-type StreamValue struct{Value []string}
+
 func (StringValue) isRedisValue() {}
 func (ListValue) isRedisValue()   {}
 func (StreamValue) isRedisValue() {}
