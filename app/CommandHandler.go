@@ -237,46 +237,48 @@ func (h CommandHandler) handleXrange(cmd Xrange) string {
 }
 
 
-func (h CommandHandler) handleXread(cmd Xread) string{
+func (h CommandHandler) handleXread(cmd Xread) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
-	entry, exists := h.store.db[cmd.Key]
-	if !exists {
-		return "*0\r\n"
-	}
+	results := ""
 
-	stream, ok := entry.Value.(StreamValue)
-	if !ok {
-		return wrongType
-	}
-
-	
-	ID, err := parseRangeID(cmd.ID)
-	if err != nil {
-		return "-ERR invalid stream ID\r\n"
-	}
-
-	var entries []StreamEntry
-
-	
-
-
-	for _, streamEntry := range stream.Entries {
-		if compareStreamIDs(streamEntry.ID, ID) < 0 {
+	for _, request := range cmd.Streams {
+		entry, exists := h.store.db[request.Key]
+		if !exists {
 			continue
 		}
-		entries = append(entries, streamEntry)
+
+		stream, ok := entry.Value.(StreamValue)
+		if !ok {
+			return wrongType
+		}
+
+		startID, err := parseRangeID(request.ID)
+		if err != nil {
+			return "-ERR invalid stream ID\r\n"
+		}
+
+		var entries []StreamEntry
+		for _, streamEntry := range stream.Entries {
+			if compareStreamIDs(streamEntry.ID, startID) > 0 {
+				entries = append(entries, streamEntry)
+			}
+		}
+
+		if len(entries) == 0 {
+			continue
+		}
+
+		results += "*2\r\n"
+		results += BulkString(request.Key)
+		results += buildXRangeResponse(entries)
 	}
 
-	if len(entries) == 0 {
+	if results == "" {
 		return "*0\r\n"
 	}
-	return fmt.Sprintf(
-		"*1\r\n*2\r\n%s%s",
-		BulkString(cmd.Key),
-		buildXRangeResponse(entries),
-	)
+	return results
 }
 
 func parseRangeID(value string) (StreamID, error) {

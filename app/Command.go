@@ -51,19 +51,24 @@ type LRange struct {
 	Key        string
 	Start, End int
 }
-
-type Xread struct{
+type XreadStream struct {
 	Key string
 	ID  string
 }
+
+type Xread struct {
+	Streams []XreadStream
+}
+
 type BLPop struct {
 	Key     string
 	Timeout float64
 }
+
 type Unknown struct{ Name string }
 
 func (Xrange) isCommand()  {}
-func (Xread)  isCommand()  {}
+func (Xread) isCommand()   {}
 func (Xadd) isCommand()    {}
 func (Ping) isCommand()    {}
 func (Echo) isCommand()    {}
@@ -86,7 +91,8 @@ func ParseCommand(parts []string) Command {
 	case "XRANGE":
 		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
 	case "XREAD":
-		return Xread{Key: parts[2], ID: parts[3]}
+		streams := createArrOfStreams(parts[2:])
+		return Xread{Streams: streams}
 	case "PING":
 		return Ping{}
 	case "ECHO":
@@ -141,3 +147,17 @@ func parseOptionalInt(parts []string, index int) *int {
 func parseInt(value string) int       { result, _ := strconv.Atoi(value); return result }
 func parseInt64(value string) int64   { result, _ := strconv.ParseInt(value, 10, 64); return result }
 func parseFloat(value string) float64 { result, _ := strconv.ParseFloat(value, 64); return result }
+
+func createArrOfStreams(args []string) []XreadStream {
+	count := len(args) / 2
+	streams := make([]XreadStream, count)
+
+	for i := 0; i < count; i++ {
+		streams[i] = XreadStream{
+			Key: args[i],
+			ID:  args[count+i],
+		}
+	}
+
+	return streams
+}
