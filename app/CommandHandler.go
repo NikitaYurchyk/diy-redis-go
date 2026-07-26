@@ -238,11 +238,11 @@ func (h CommandHandler) handleXrange(cmd Xrange) string {
 
 
 func (h CommandHandler) handleXread(cmd Xread) string{
-	fmt.Println(cmd.Streams)
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
-	results := make([]string, 0, len(cmd.Streams))
+	results := ""
+	count := 0
 	for _, req := range cmd.Streams{
 		entry, exists := h.store.db[req.Key]
 		if !exists {
@@ -276,15 +276,16 @@ func (h CommandHandler) handleXread(cmd Xread) string{
 		streamResponse += BulkString(req.Key)
 		streamResponse += buildXRangeResponse(entries)
 
-		results = append(results, streamResponse)
+		results += streamResponse
+		count++
 	}
 
-	if len(results) == 0 {
+	if count == 0 {
 		return "*0\r\n"
 	}
 	
 
-	return fmt.Sprintf("*%d\r\n%s", len(results), strings.Join(results, ""))
+	return fmt.Sprintf("*%d\r\n%s", count, results)
 
 }
 
