@@ -51,6 +51,11 @@ type LRange struct {
 	Key        string
 	Start, End int
 }
+
+type Xread struct{
+	Key string
+	ID  string
+}
 type BLPop struct {
 	Key     string
 	Timeout float64
@@ -58,6 +63,7 @@ type BLPop struct {
 type Unknown struct{ Name string }
 
 func (Xrange) isCommand()  {}
+func (Xread)  isCommand()  {}
 func (Xadd) isCommand()    {}
 func (Ping) isCommand()    {}
 func (Echo) isCommand()    {}
@@ -79,6 +85,8 @@ func ParseCommand(parts []string) Command {
 		return Xadd{Key: parts[1], ID: parts[2], Fields: parts[3:]}
 	case "XRANGE":
 		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
+	case "XREAD":
+		return Xread{Key: parts[2], ID: parts[3]}
 	case "PING":
 		return Ping{}
 	case "ECHO":

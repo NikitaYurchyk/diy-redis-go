@@ -18,6 +18,8 @@ type CommandHandler struct {
 
 func (h CommandHandler) Handle(command Command) string {
 	switch cmd := command.(type) {
+	case Xread:
+		return h.handleXread(cmd)
 	case Ping:
 		return "+PONG\r\n"
 	case Echo:
@@ -119,6 +121,8 @@ func (h CommandHandler) handleRPush(cmd RPush) string {
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
+
+
 
 func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 
@@ -231,6 +235,50 @@ func (h CommandHandler) handleXrange(cmd Xrange) string {
 
 	return buildXRangeResponse(entries)
 }
+
+
+func (h CommandHandler) handleXread(cmd Xread) string{
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		return "*0\r\n"
+	}
+
+	stream, ok := entry.Value.(StreamValue)
+	if !ok {
+		return wrongType
+	}
+
+	
+	ID, err := parseRangeID(cmd.ID)
+	if err != nil {
+		return "-ERR invalid stream ID\r\n"
+	}
+
+	var entries []StreamEntry
+
+	
+
+
+	for _, streamEntry := range stream.Entries {
+		if compareStreamIDs(streamEntry.ID, ID) < 0 {
+			continue
+		}
+		entries = append(entries, streamEntry)
+	}
+
+	if len(entries) == 0 {
+		return "*0\r\n"
+	}
+	return fmt.Sprintf(
+		"*1\r\n*2\r\n%s%s",
+		BulkString(cmd.Key),
+		buildXRangeResponse(entries),
+	)
+}
+
 func parseRangeID(value string) (StreamID, error) {
 	if value == "-" {
 		return StreamID{Millis: 0, Seq: 0}, nil
@@ -511,7 +559,6 @@ func (h CommandHandler) removeWaiter(w *waiter) {
 	}
 }
 
-// removeWaiterLocked removes a waiter from every list it was waiting on.
 func (h CommandHandler) removeWaiterLocked(w *waiter) {
 	for key, waiters := range h.store.waiters {
 		for i := 0; i < len(waiters); {
