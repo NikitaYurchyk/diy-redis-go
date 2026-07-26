@@ -284,7 +284,7 @@ func (h CommandHandler) handleXread(cmd Xread) string {
 	wait := make(chan streamResult, 1)
 	for _, request := range cmd.Streams {
 		id, _ := parseRangeID(request.ID)
-		streamWaiter := &streamWaiter{key: request.Key, after: id, result: wait}
+		streamWaiter := &streamWaiter{id: id, result: wait}
 		h.store.streamWaiters[request.Key] = append(h.store.streamWaiters[request.Key], streamWaiter)
 	}
 	h.store.mu.Unlock()
@@ -624,9 +624,6 @@ func max(left, right int) int {
 }
 func (h CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
 	for _, waiter := range h.store.streamWaiters[key] {
-		if compareStreamIDs(entry.ID, waiter.after) <= 0 {
-			continue
-		}
 		select {
 		case waiter.result <- streamResult{key: key, entry: entry}:
 		default:

@@ -50,8 +50,7 @@ type streamResult struct {
 }
 
 type streamWaiter struct {
-	key    string
-	after  StreamID
+	id     StreamID
 	result chan streamResult
 }
 
