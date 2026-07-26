@@ -239,40 +239,42 @@ func (h CommandHandler) handleXread(cmd Xread) string {
 
 	results := ""
 	count := 0
-	for _, request := range cmd.Streams {
-		entry, exists := h.store.db[request.Key]
-		if !exists {
-			continue
-		}
-
-		stream, ok := entry.Value.(StreamValue)
-		if !ok {
-			h.store.mu.Unlock()
-			return wrongType
-		}
-
-		id, err := parseRangeID(request.ID)
-		if err != nil {
-			h.store.mu.Unlock()
-			return "-ERR invalid stream ID\r\n"
-		}
-
-		entries := make([]StreamEntry, 0)
-		for _, streamEntry := range stream.Entries {
-			if compareStreamIDs(streamEntry.ID, id) > 0 {
-				entries = append(entries, streamEntry)
+	if !strings.EqualFold(cmd.Streams[0].ID, "$"){
+		for _, request := range cmd.Streams {
+			entry, exists := h.store.db[request.Key]
+			if !exists {
+				continue
 			}
-		}
-		if len(entries) == 0 {
-			continue
-		}
 
-		results += "*2\r\n" + BulkString(request.Key) + buildXRangeResponse(entries)
-		count++
-	}
-	if count > 0 {
-		h.store.mu.Unlock()
-		return fmt.Sprintf("*%d\r\n%s", count, results)
+			stream, ok := entry.Value.(StreamValue)
+			if !ok {
+				h.store.mu.Unlock()
+				return wrongType
+			}
+
+			id, err := parseRangeID(request.ID)
+			if err != nil {
+				h.store.mu.Unlock()
+				return "-ERR invalid stream ID\r\n"
+			}
+
+			entries := make([]StreamEntry, 0)
+			for _, streamEntry := range stream.Entries {
+				if compareStreamIDs(streamEntry.ID, id) > 0 {
+					entries = append(entries, streamEntry)
+				}
+			}
+			if len(entries) == 0 {
+				continue
+			}
+
+			results += "*2\r\n" + BulkString(request.Key) + buildXRangeResponse(entries)
+			count++
+		}
+		if count > 0 {
+			h.store.mu.Unlock()
+			return fmt.Sprintf("*%d\r\n%s", count, results)
+		}
 	}
 	if cmd.Block == -1 {
 		h.store.mu.Unlock()
