@@ -44,15 +44,28 @@ type waiter struct {
 	active bool
 }
 
+type streamResult struct {
+	key   string
+	entry StreamEntry
+}
+
+type streamWaiter struct {
+	key    string
+	after  StreamID
+	result chan streamResult
+}
+
 type Store struct {
-	mu      sync.Mutex
-	db      map[string]Entry
-	waiters map[string][]*waiter
+	mu            sync.Mutex
+	db            map[string]Entry
+	waiters       map[string][]*waiter
+	streamWaiters map[string][]*streamWaiter
 }
 
 func NewStore() *Store {
 	return &Store{
-		db:      make(map[string]Entry),
-		waiters: make(map[string][]*waiter),
+		db:            make(map[string]Entry),
+		waiters:       make(map[string][]*waiter),
+		streamWaiters: make(map[string][]*streamWaiter),
 	}
 }

@@ -122,8 +122,6 @@ func (h CommandHandler) handleRPush(cmd RPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
-
-
 func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 
 	if requested == "*" {
@@ -236,57 +234,71 @@ func (h CommandHandler) handleXrange(cmd Xrange) string {
 	return buildXRangeResponse(entries)
 }
 
-
-func (h CommandHandler) handleXread(cmd Xread) string{
+func (h CommandHandler) handleXread(cmd Xread) string {
 	h.store.mu.Lock()
-	defer h.store.mu.Unlock()
 
 	results := ""
 	count := 0
-	for _, req := range cmd.Streams{
-		entry, exists := h.store.db[req.Key]
+	for _, request := range cmd.Streams {
+		entry, exists := h.store.db[request.Key]
 		if !exists {
 			continue
 		}
 
 		stream, ok := entry.Value.(StreamValue)
 		if !ok {
+			h.store.mu.Unlock()
 			return wrongType
 		}
 
-		
-		ID, err := parseRangeID(req.ID)
+		id, err := parseRangeID(request.ID)
 		if err != nil {
+			h.store.mu.Unlock()
 			return "-ERR invalid stream ID\r\n"
 		}
 
-		var entries []StreamEntry
-
+		entries := make([]StreamEntry, 0)
 		for _, streamEntry := range stream.Entries {
-			if compareStreamIDs(streamEntry.ID, ID) <= 0 {
-				continue
+			if compareStreamIDs(streamEntry.ID, id) > 0 {
+				entries = append(entries, streamEntry)
 			}
-			entries = append(entries, streamEntry)
 		}
-
 		if len(entries) == 0 {
-			return "*0\r\n"
+			continue
 		}
-		streamResponse := "*2\r\n"
-		streamResponse += BulkString(req.Key)
-		streamResponse += buildXRangeResponse(entries)
 
-		results += streamResponse
+		results += "*2\r\n" + BulkString(request.Key) + buildXRangeResponse(entries)
 		count++
 	}
-
-	if count == 0 {
+	if count > 0 {
+		h.store.mu.Unlock()
+		return fmt.Sprintf("*%d\r\n%s", count, results)
+	}
+	if cmd.Block == -1 {
+		h.store.mu.Unlock()
 		return "*0\r\n"
 	}
-	
 
-	return fmt.Sprintf("*%d\r\n%s", count, results)
+	wait := make(chan streamResult, 1)
+	for _, request := range cmd.Streams {
+		id, _ := parseRangeID(request.ID)
+		streamWaiter := &streamWaiter{key: request.Key, after: id, result: wait}
+		h.store.streamWaiters[request.Key] = append(h.store.streamWaiters[request.Key], streamWaiter)
+	}
+	h.store.mu.Unlock()
 
+	var result streamResult
+	if cmd.Block == 0 {
+		result = <-wait
+	} else {
+		select {
+		case result = <-wait:
+		case <-time.After(cmd.Block):
+			return "*-1\r\n"
+		}
+	}
+
+	return "*1\r\n*2\r\n" + BulkString(result.key) + buildXRangeResponse([]StreamEntry{result.entry})
 }
 
 func parseRangeID(value string) (StreamID, error) {
@@ -373,14 +385,15 @@ func (h CommandHandler) handleXadd(cmd Xadd) string {
 		return fmt.Sprintf("-ERR %s\r\n", err)
 	}
 
-	stream.Entries = append(stream.Entries, StreamEntry{
+	newEntry := StreamEntry{
 		ID:     id,
 		Fields: cmd.Fields,
-	})
+	}
+	stream.Entries = append(stream.Entries, newEntry)
 
 	entry.Value = stream
 	h.store.db[cmd.Key] = entry
-
+	h.notifyStreamWaiters(cmd.Key, newEntry)
 	idString := fmt.Sprintf("%d-%d", id.Millis, id.Seq)
 	return BulkString(idString)
 }
@@ -421,6 +434,7 @@ func (h CommandHandler) handleLLen(cmd LLen) string {
 }
 
 func (h CommandHandler) handleLPop(cmd LPop) string { return h.handlePop(cmd.Key, cmd.Count, true) }
+
 func (h CommandHandler) handleRPop(cmd RPop) string { return h.handlePop(cmd.Key, cmd.Count, false) }
 
 func (h CommandHandler) handlePop(key string, count *int, fromLeft bool) string {
@@ -532,7 +546,6 @@ func (h CommandHandler) handleBLPop(cmd BLPop) string {
 	}
 }
 
-// notifyWaiters is called while store.mu is held.
 func (h CommandHandler) notifyWaiters(key string) {
 	for len(h.store.waiters[key]) > 0 {
 		entry, exists := h.store.db[key]
@@ -606,4 +619,15 @@ func max(left, right int) int {
 		return left
 	}
 	return right
+}
+func (h CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
+	for _, waiter := range h.store.streamWaiters[key] {
+		if compareStreamIDs(entry.ID, waiter.after) <= 0 {
+			continue
+		}
+		select {
+		case waiter.result <- streamResult{key: key, entry: entry}:
+		default:
+		}
+	}
 }

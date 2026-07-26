@@ -58,6 +58,7 @@ type XreadStream struct {
 
 type Xread struct {
 	Streams []XreadStream
+	Block	time.Duration
 }
 
 type BLPop struct {
@@ -91,8 +92,15 @@ func ParseCommand(parts []string) Command {
 	case "XRANGE":
 		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
 	case "XREAD":
+		if strings.EqualFold(parts[1], "BLOCK"){
+			streams := createArrOfStreams(parts[4:])
+			return Xread{Streams: streams, Block: time.Duration(parseInt64(parts[2])) * time.Millisecond}
+
+		}
+		
 		streams := createArrOfStreams(parts[2:])
-		return Xread{Streams: streams}
+		return Xread{Streams: streams, Block: -1}
+		
 	case "PING":
 		return Ping{}
 	case "ECHO":
