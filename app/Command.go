@@ -12,8 +12,14 @@ type Command interface {
 
 type Xadd struct {
 	Key    string
-	ID 	   string
+	ID     string
 	Fields []string
+}
+
+type Xrange struct {
+	Key   string
+	BegID string
+	EndID string
 }
 
 type Ping struct{}
@@ -51,7 +57,7 @@ type BLPop struct {
 }
 type Unknown struct{ Name string }
 
-
+func (Xrange) isCommand()  {}
 func (Xadd) isCommand()    {}
 func (Ping) isCommand()    {}
 func (Echo) isCommand()    {}
@@ -71,6 +77,8 @@ func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
 	case "XADD":
 		return Xadd{Key: parts[1], ID: parts[2], Fields: parts[3:]}
+	case "XRANGE":
+		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
 	case "PING":
 		return Ping{}
 	case "ECHO":

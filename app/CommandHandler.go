@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -43,6 +44,8 @@ func (h CommandHandler) Handle(command Command) string {
 		return h.handleBLPop(cmd)
 	case Xadd:
 		return h.handleXadd(cmd)
+	case Xrange:
+		return h.handleXrange(cmd)
 	case Unknown:
 		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd.Name)
 	default:
@@ -187,6 +190,105 @@ func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 	}
 
 	return id, nil
+}
+
+func (h CommandHandler) handleXrange(cmd Xrange) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	if !exists {
+		return "*0\r\n"
+	}
+
+	stream, ok := entry.Value.(StreamValue)
+	if !ok {
+		return wrongType
+	}
+
+	start, err := parseRangeID(cmd.BegID)
+	if err != nil {
+		return "-ERR invalid stream ID\r\n"
+	}
+
+	end, err := parseRangeID(cmd.EndID)
+	if err != nil {
+		return "-ERR invalid stream ID\r\n"
+	}
+
+	var entries []StreamEntry
+
+	for _, streamEntry := range stream.Entries {
+		if compareStreamIDs(streamEntry.ID, start) < 0 {
+			continue
+		}
+		if compareStreamIDs(streamEntry.ID, end) > 0 {
+			break
+		}
+
+		entries = append(entries, streamEntry)
+	}
+
+	return buildXRangeResponse(entries)
+}
+func parseRangeID(value string) (StreamID, error) {
+	if value == "-" {
+		return StreamID{Millis: 0, Seq: 0}, nil
+	}
+
+	if value == "+" {
+		return StreamID{
+			Millis: math.MaxInt64,
+			Seq:    math.MaxInt64,
+		}, nil
+	}
+
+	parts := strings.SplitN(value, "-", 2)
+	if len(parts) != 2 {
+		return StreamID{}, fmt.Errorf("invalid stream ID")
+	}
+
+	millis, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return StreamID{}, err
+	}
+
+	seq, err := strconv.ParseInt(parts[1], 10, 64)
+	if err != nil {
+		return StreamID{}, err
+	}
+
+	return StreamID{Millis: millis, Seq: seq}, nil
+}
+
+func compareStreamIDs(left, right StreamID) int {
+	if left.Millis < right.Millis {
+		return -1
+	}
+	if left.Millis > right.Millis {
+		return 1
+	}
+	if left.Seq < right.Seq {
+		return -1
+	}
+	if left.Seq > right.Seq {
+		return 1
+	}
+	return 0
+}
+
+func buildXRangeResponse(entries []StreamEntry) string {
+	response := fmt.Sprintf("*%d\r\n", len(entries))
+
+	for _, entry := range entries {
+		id := fmt.Sprintf("%d-%d", entry.ID.Millis, entry.ID.Seq)
+
+		response += "*2\r\n"
+		response += BulkString(id)
+		response += buildArray(entry.Fields)
+	}
+
+	return response
 }
 
 func (h CommandHandler) handleXadd(cmd Xadd) string {
