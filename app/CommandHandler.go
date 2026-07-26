@@ -159,9 +159,14 @@ func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 			}
 		}
 
+		sequence := int64(0)
+		if millis == 0 {
+			sequence = 1
+		}
+
 		return StreamID{
 			Millis: millis,
-			Seq:    0,
+			Seq:    sequence,
 		}, nil
 	}
 
