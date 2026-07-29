@@ -411,7 +411,7 @@ func (h CommandHandler) handleIncr(cmd Incr) string {
 	if !exists {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
-		return fmt.Sprintf(":%d\r\n", entry.Value)
+		return ":1\r\n"
 	}
 	
 	switch value := entry.Value.(type) {
