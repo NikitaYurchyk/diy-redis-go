@@ -12,14 +12,25 @@ import (
 
 const wrongType = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
 
+type Transaction struct {
+    active bool
+    queue  []Command
+}
 type CommandHandler struct {
 	store *Store
+	tx Transaction
 }
 
 func (h CommandHandler) Handle(command Command) string {
+	if h.tx.active{
+		h.tx.queue = append(h.tx.queue, command)
+    	return "+QUEUED\r\n"		
+	}
 	switch cmd := command.(type) {
 	case Xread:
 		return h.handleXread(cmd)
+	case Multi:
+		return h.handleMulti(cmd)
 	case Ping:
 		return "+PONG\r\n"
 	case Echo:
@@ -102,6 +113,11 @@ func (h CommandHandler) handleSet(cmd Set) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
+	return "+OK\r\n"
+}
+
+func (h CommandHandler) handleMulti(cmd Multi) string{
+	h.tx.active = true
 	return "+OK\r\n"
 }
 

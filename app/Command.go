@@ -71,6 +71,8 @@ type Incr struct {
 	Key string
 }
 
+type Multi struct{}
+
 type Unknown struct{ Name string }
 
 func (Incr) isCommand()    {}
@@ -90,10 +92,13 @@ func (RPop) isCommand()    {}
 func (LRange) isCommand()  {}
 func (BLPop) isCommand()   {}
 func (Unknown) isCommand() {}
+func (Multi) isCommand()   {}
 
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
-	
+	case "MULTI":
+		return Multi{}
+
 	case "INCR":
 		return Incr{Key: parts[1]}
 
@@ -102,7 +107,7 @@ func ParseCommand(parts []string) Command {
 
 	case "XRANGE":
 		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
-	
+
 	case "XREAD":
 		if strings.EqualFold(parts[1], "BLOCK") {
 			streams := createArrOfStreams(parts[4:])
