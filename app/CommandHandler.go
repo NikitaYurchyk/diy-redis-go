@@ -48,6 +48,8 @@ func (h CommandHandler) Handle(command Command) string {
 		return h.handleXadd(cmd)
 	case Xrange:
 		return h.handleXrange(cmd)
+	case Incr:
+		return h.handleIncr(cmd)
 	case Unknown:
 		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd.Name)
 	default:
@@ -239,7 +241,7 @@ func (h CommandHandler) handleXread(cmd Xread) string {
 
 	results := ""
 	count := 0
-	if !strings.EqualFold(cmd.Streams[0].ID, "$"){
+	if !strings.EqualFold(cmd.Streams[0].ID, "$") {
 		for _, request := range cmd.Streams {
 			entry, exists := h.store.db[request.Key]
 			if !exists {
@@ -398,6 +400,34 @@ func (h CommandHandler) handleXadd(cmd Xadd) string {
 	h.notifyStreamWaiters(cmd.Key, newEntry)
 	idString := fmt.Sprintf("%d-%d", id.Millis, id.Seq)
 	return BulkString(idString)
+}
+
+func (h CommandHandler) handleIncr(cmd Incr) string {
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+
+	entry, exists := h.store.db[cmd.Key]
+	
+	if !exists {
+		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
+		h.store.db[cmd.Key] = entry
+		return fmt.Sprintf(":%d\r\n", entry.Value)
+	}
+	
+	switch value := entry.Value.(type) {
+	case StringValue:
+		n, err := strconv.ParseInt(value.Value, 10, 64)
+		if err != nil {
+			return "-ERR value is not an integer or out of range\r\n"
+		}
+		n++
+		entry.Value = StringValue{Value: strconv.FormatInt(n, 10)}
+		h.store.db[cmd.Key] = entry
+		return fmt.Sprintf(":%d\r\n", n)
+	default:
+		return "-ERR value is not an integer or out of range\r\n"
+	}
+
 }
 
 func (h CommandHandler) handleLPush(cmd LPush) string {
