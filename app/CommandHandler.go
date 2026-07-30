@@ -13,19 +13,50 @@ import (
 const wrongType = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
 
 type Transaction struct {
-    active bool
-    queue  []Command
+	active bool
+	queue  []Command
 }
 type CommandHandler struct {
-	store *Store
-	tx Transaction
+	store  *Store
+	tx     Transaction
+	isExec bool
 }
 
 func (h CommandHandler) Handle(command Command) string {
-	if h.tx.active{
-		h.tx.queue = append(h.tx.queue, command)
-    	return "+QUEUED\r\n"		
+	switch command.(type) {
+	case Multi:
+		if h.tx.active {
+			return "-ERR MULTI calls can not be nested\r\n"
+		}
+
+		h.tx.active = true
+		h.tx.queue = nil
+		return "+OK\r\n"
+
+	case Exec:
+		if !h.tx.active {
+			return "-ERR EXEC without MULTI\r\n"
+		}
+
+		return h.handleExec()
+	
+
+	// case Discard:
+	// 	if !h.tx.active {
+	// 		return "-ERR DISCARD without MULTI\r\n"
+	// 	}
+
+	// 	h.tx.active = false
+	// 	h.tx.queue = nil
+	// 	return "+OK\r\n"
+	// }
 	}
+
+	if h.tx.active {
+		h.tx.queue = append(h.tx.queue, command)
+		return "+QUEUED\r\n"
+	}
+
 	switch cmd := command.(type) {
 	case Xread:
 		return h.handleXread(cmd)
@@ -116,7 +147,7 @@ func (h CommandHandler) handleSet(cmd Set) string {
 	return "+OK\r\n"
 }
 
-func (h CommandHandler) handleMulti(cmd Multi) string{
+func (h CommandHandler) handleMulti(cmd Multi) string {
 	h.tx.active = true
 	return "+OK\r\n"
 }
@@ -250,6 +281,19 @@ func (h CommandHandler) handleXrange(cmd Xrange) string {
 	}
 
 	return buildXRangeResponse(entries)
+}
+
+func (h *CommandHandler) handleExec() string {
+    queued := h.tx.queue
+    h.tx.active = false
+    h.tx.queue = nil
+
+    replies := make([]string, 0, len(queued))
+    for _, queuedCommand := range queued {
+        replies = append(replies, h.Handle(queuedCommand))
+    }
+
+    return fmt.Sprintf("*%d\r\n%s", len(replies), strings.Join(replies, ""))
 }
 
 func (h CommandHandler) handleXread(cmd Xread) string {
@@ -423,13 +467,13 @@ func (h CommandHandler) handleIncr(cmd Incr) string {
 	defer h.store.mu.Unlock()
 
 	entry, exists := h.store.db[cmd.Key]
-	
+
 	if !exists {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
 		return ":1\r\n"
 	}
-	
+
 	switch value := entry.Value.(type) {
 	case StringValue:
 		n, err := strconv.ParseInt(value.Value, 10, 64)

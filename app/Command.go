@@ -72,9 +72,11 @@ type Incr struct {
 }
 
 type Multi struct{}
+type Exec struct {}
 
 type Unknown struct{ Name string }
 
+func (Exec) isCommand()    {}
 func (Incr) isCommand()    {}
 func (Xrange) isCommand()  {}
 func (Xread) isCommand()   {}
@@ -98,6 +100,9 @@ func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
 	case "MULTI":
 		return Multi{}
+
+	case "EXEC":
+		return Exec{}
 
 	case "INCR":
 		return Incr{Key: parts[1]}
