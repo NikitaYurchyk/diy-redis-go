@@ -41,16 +41,16 @@ func (h *CommandHandler) Handle(command Command) string {
 		return h.handleExec()
 	
 
-	// case Discard:
-	// 	if !h.tx.active {
-	// 		return "-ERR DISCARD without MULTI\r\n"
-	// 	}
+	case Discard:
+		if !h.tx.active {
+			return "-ERR DISCARD without MULTI\r\n"
+		}
 
-	// 	h.tx.active = false
-	// 	h.tx.queue = nil
-	// 	return "+OK\r\n"
-	// }
+		h.tx.active = false
+		h.tx.queue = nil
+		return "+OK\r\n"
 	}
+	
 
 	if h.tx.active {
 		h.tx.queue = append(h.tx.queue, command)

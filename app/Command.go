@@ -72,10 +72,12 @@ type Incr struct {
 }
 
 type Multi struct{}
-type Exec struct {}
+type Exec struct{}
+type Discard struct{}
 
 type Unknown struct{ Name string }
 
+func (Discard) isCommand() {}
 func (Exec) isCommand()    {}
 func (Incr) isCommand()    {}
 func (Xrange) isCommand()  {}
@@ -103,6 +105,9 @@ func ParseCommand(parts []string) Command {
 
 	case "EXEC":
 		return Exec{}
+	
+	case "DISCARD":
+		return Discard{}
 
 	case "INCR":
 		return Incr{Key: parts[1]}
