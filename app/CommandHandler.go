@@ -22,7 +22,7 @@ type CommandHandler struct {
 	isExec bool
 }
 
-func (h CommandHandler) Handle(command Command) string {
+func (h *CommandHandler) Handle(command Command) string {
 	switch command.(type) {
 	case Multi:
 		if h.tx.active {
@@ -99,7 +99,7 @@ func (h CommandHandler) Handle(command Command) string {
 	}
 }
 
-func (h CommandHandler) handleGet(cmd Get) string {
+func (h *CommandHandler) handleGet(cmd Get) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -116,7 +116,7 @@ func (h CommandHandler) handleGet(cmd Get) string {
 	return wrongType
 }
 
-func (h CommandHandler) handleType(cmd Type) string {
+func (h *CommandHandler) handleType(cmd Type) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -140,19 +140,19 @@ func (h CommandHandler) handleType(cmd Type) string {
 	}
 }
 
-func (h CommandHandler) handleSet(cmd Set) string {
+func (h *CommandHandler) handleSet(cmd Set) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
 	return "+OK\r\n"
 }
 
-func (h CommandHandler) handleMulti(cmd Multi) string {
+func (h *CommandHandler) handleMulti(cmd Multi) string {
 	h.tx.active = true
 	return "+OK\r\n"
 }
 
-func (h CommandHandler) handleRPush(cmd RPush) string {
+func (h *CommandHandler) handleRPush(cmd RPush) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -243,7 +243,7 @@ func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 	return id, nil
 }
 
-func (h CommandHandler) handleXrange(cmd Xrange) string {
+func (h *CommandHandler) handleXrange(cmd Xrange) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -296,7 +296,7 @@ func (h *CommandHandler) handleExec() string {
     return fmt.Sprintf("*%d\r\n%s", len(replies), strings.Join(replies, ""))
 }
 
-func (h CommandHandler) handleXread(cmd Xread) string {
+func (h *CommandHandler) handleXread(cmd Xread) string {
 	h.store.mu.Lock()
 
 	results := ""
@@ -425,7 +425,7 @@ func buildXRangeResponse(entries []StreamEntry) string {
 	return response
 }
 
-func (h CommandHandler) handleXadd(cmd Xadd) string {
+func (h *CommandHandler) handleXadd(cmd Xadd) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -462,7 +462,7 @@ func (h CommandHandler) handleXadd(cmd Xadd) string {
 	return BulkString(idString)
 }
 
-func (h CommandHandler) handleIncr(cmd Incr) string {
+func (h *CommandHandler) handleIncr(cmd Incr) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -490,7 +490,7 @@ func (h CommandHandler) handleIncr(cmd Incr) string {
 
 }
 
-func (h CommandHandler) handleLPush(cmd LPush) string {
+func (h *CommandHandler) handleLPush(cmd LPush) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -511,7 +511,7 @@ func (h CommandHandler) handleLPush(cmd LPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
-func (h CommandHandler) handleLLen(cmd LLen) string {
+func (h *CommandHandler) handleLLen(cmd LLen) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -525,11 +525,11 @@ func (h CommandHandler) handleLLen(cmd LLen) string {
 	return wrongType
 }
 
-func (h CommandHandler) handleLPop(cmd LPop) string { return h.handlePop(cmd.Key, cmd.Count, true) }
+func (h *CommandHandler) handleLPop(cmd LPop) string { return h.handlePop(cmd.Key, cmd.Count, true) }
 
-func (h CommandHandler) handleRPop(cmd RPop) string { return h.handlePop(cmd.Key, cmd.Count, false) }
+func (h *CommandHandler) handleRPop(cmd RPop) string { return h.handlePop(cmd.Key, cmd.Count, false) }
 
-func (h CommandHandler) handlePop(key string, count *int, fromLeft bool) string {
+func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -579,7 +579,7 @@ func (h CommandHandler) handlePop(key string, count *int, fromLeft bool) string 
 	return buildArray(items)
 }
 
-func (h CommandHandler) handleLRange(cmd LRange) string {
+func (h *CommandHandler) handleLRange(cmd LRange) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -607,7 +607,7 @@ func (h CommandHandler) handleLRange(cmd LRange) string {
 	return buildArray(list.Values[start : end+1])
 }
 
-func (h CommandHandler) handleBLPop(cmd BLPop) string {
+func (h *CommandHandler) handleBLPop(cmd BLPop) string {
 	h.store.mu.Lock()
 	if entry, exists := h.store.db[cmd.Key]; exists {
 		if list, ok := entry.Value.(ListValue); ok && len(list.Values) > 0 {
@@ -638,7 +638,7 @@ func (h CommandHandler) handleBLPop(cmd BLPop) string {
 	}
 }
 
-func (h CommandHandler) notifyWaiters(key string) {
+func (h *CommandHandler) notifyWaiters(key string) {
 	for len(h.store.waiters[key]) > 0 {
 		entry, exists := h.store.db[key]
 		if !exists {
@@ -665,7 +665,7 @@ func (h CommandHandler) notifyWaiters(key string) {
 	}
 }
 
-func (h CommandHandler) removeWaiter(w *waiter) {
+func (h *CommandHandler) removeWaiter(w *waiter) {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	if w.active {
@@ -674,7 +674,7 @@ func (h CommandHandler) removeWaiter(w *waiter) {
 	}
 }
 
-func (h CommandHandler) removeWaiterLocked(w *waiter) {
+func (h *CommandHandler) removeWaiterLocked(w *waiter) {
 	for key, waiters := range h.store.waiters {
 		for i := 0; i < len(waiters); {
 			if waiters[i] == w {
@@ -712,7 +712,7 @@ func max(left, right int) int {
 	}
 	return right
 }
-func (h CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
+func (h *CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
 	for _, waiter := range h.store.streamWaiters[key] {
 		select {
 		case waiter.result <- streamResult{key: key, entry: entry}:
