@@ -45,6 +45,7 @@ func (h *CommandHandler) Handle(command Command) string {
 
 		h.tx.active = false
 		h.tx.queue = nil
+		clear(h.watched)
 		return "+OK\r\n"
 	
 	case Watch:
