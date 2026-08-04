@@ -46,12 +46,18 @@ func (h *CommandHandler) Handle(command Command) string {
 		h.tx.active = false
 		h.tx.queue = nil
 		return "+OK\r\n"
+	
 	case Watch:
 		if h.tx.active {
 			return "-ERR WATCH inside MULTI is not allowed\r\n"
 		}
 		return h.handleWatched(cmd)
+	
+	case Unwatch:
+		clear(h.watched)
+		return "+OK\r\n"
 	}
+
 	if h.tx.active {
 		h.tx.queue = append(h.tx.queue, command)
 		return "+QUEUED\r\n"
@@ -302,6 +308,7 @@ func (h *CommandHandler) handleExec() string {
 		if h.store.versions[key] != version {
 			return "*-1\r\n"
 		}
+		
 	}
 
 	replies := make([]string, 0, len(queued))

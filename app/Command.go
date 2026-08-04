@@ -74,9 +74,10 @@ type Incr struct {
 type Multi struct{}
 type Exec struct{}
 type Discard struct{}
-type Watch struct{
+type Watch struct {
 	Keys []string
 }
+type Unwatch struct{}
 
 type Unknown struct{ Name string }
 
@@ -101,6 +102,7 @@ func (LRange) isCommand()  {}
 func (BLPop) isCommand()   {}
 func (Unknown) isCommand() {}
 func (Multi) isCommand()   {}
+func (Unwatch) isCommand() {}
 
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
@@ -130,6 +132,9 @@ func ParseCommand(parts []string) Command {
 		}
 		streams := createArrOfStreams(parts[2:])
 		return Xread{Streams: streams, Block: -1}
+	
+	case "UNWATCH":
+		return Unwatch{}
 
 	case "WATCH":
 		return Watch{parts[1:]}
@@ -175,8 +180,6 @@ func ParseCommand(parts []string) Command {
 	}
 }
 
-
-
 func parseExpiry(parts []string) *time.Time {
 	for i := 3; i < len(parts); i++ {
 		switch strings.ToUpper(parts[i]) {
@@ -199,9 +202,9 @@ func parseOptionalInt(parts []string, index int) *int {
 	return &value
 }
 
-func parseInt(value string) int       { result, _ := strconv.Atoi(value); return result }
+func parseInt(value string) int { result, _ := strconv.Atoi(value); return result }
 
-func parseInt64(value string) int64   { result, _ := strconv.ParseInt(value, 10, 64); return result }
+func parseInt64(value string) int64 { result, _ := strconv.ParseInt(value, 10, 64); return result }
 
 func parseFloat(value string) float64 { result, _ := strconv.ParseFloat(value, 64); return result }
 
