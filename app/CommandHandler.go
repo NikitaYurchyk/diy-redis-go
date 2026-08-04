@@ -36,7 +36,6 @@ func (h *CommandHandler) Handle(command Command) string {
 		if !h.tx.active {
 			return "-ERR EXEC without MULTI\r\n"
 		}
-
 		return h.handleExec()
 
 	case Discard:
@@ -48,7 +47,7 @@ func (h *CommandHandler) Handle(command Command) string {
 		h.tx.queue = nil
 		return "+OK\r\n"
 	case Watch:
-		if h.tx.active{
+		if h.tx.active {
 			return "-ERR WATCH inside MULTI is not allowed\r\n"
 		}
 		return h.handleWatched(cmd)
@@ -174,10 +173,10 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
-func (h *CommandHandler) handleWatched(cmd Watch) string{
+func (h *CommandHandler) handleWatched(cmd Watch) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
-	for _, key := range cmd.Keys{
+	for _, key := range cmd.Keys {
 		h.watched[key] = h.store.versions[key]
 	}
 	return "+OK\r\n"
@@ -299,6 +298,11 @@ func (h *CommandHandler) handleExec() string {
 	queued := h.tx.queue
 	h.tx.active = false
 	h.tx.queue = nil
+	for key, version := range h.watched {
+		if h.store.versions[key] != version {
+			return "*-1\r\n"
+		}
+	}
 
 	replies := make([]string, 0, len(queued))
 	for _, queuedCommand := range queued {
@@ -721,7 +725,7 @@ func buildArray(items []string) string {
 	return response
 }
 
-func (h *CommandHandler) incrVersion(key string){
+func (h *CommandHandler) incrVersion(key string) {
 	h.store.versions[key]++
 }
 
