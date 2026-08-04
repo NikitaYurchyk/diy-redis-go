@@ -54,8 +54,7 @@ func (h *CommandHandler) Handle(command Command) string {
 		return h.handleWatched(cmd)
 	
 	case Unwatch:
-		clear(h.watched)
-		return "+OK\r\n"
+		return h.handleUnwatch(cmd)
 	}
 
 	if h.tx.active {
@@ -188,6 +187,13 @@ func (h *CommandHandler) handleWatched(cmd Watch) string {
 	return "+OK\r\n"
 }
 
+func (h *CommandHandler) handleUnwatch(cmd Unwatch) string{
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
+	clear(h.watched)
+	return "+OK\r\n" 
+}
+
 func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 
 	if requested == "*" {
@@ -304,6 +310,9 @@ func (h *CommandHandler) handleExec() string {
 	queued := h.tx.queue
 	h.tx.active = false
 	h.tx.queue = nil
+	defer clear(h.watched)
+
+
 	for key, version := range h.watched {
 		if h.store.versions[key] != version {
 			return "*-1\r\n"
