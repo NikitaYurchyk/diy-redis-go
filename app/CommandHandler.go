@@ -49,7 +49,7 @@ func (h *CommandHandler) Handle(command Command) string {
 		return "+OK\r\n"
 	case Watch:
 		if h.tx.active{
-			return "-ERR WATCH inside MULTI"
+			return "-ERR WATCH inside MULTI is not allowed\r\n"
 		}
 		return h.handleWatched(cmd)
 	}
