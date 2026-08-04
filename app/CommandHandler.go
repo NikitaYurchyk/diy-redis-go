@@ -5,8 +5,6 @@ import (
 	"math"
 	"strconv"
 	"strings"
-
-	// "strings"
 	"time"
 )
 
@@ -17,13 +15,14 @@ type Transaction struct {
 	queue  []Command
 }
 type CommandHandler struct {
-	store  *Store
-	tx     Transaction
-	isExec bool
+	store   *Store
+	tx      Transaction
+	isExec  bool
+	watched map[string]uint64
 }
 
 func (h *CommandHandler) Handle(command Command) string {
-	switch command.(type) {
+	switch cmd := command.(type) {
 	case Multi:
 		if h.tx.active {
 			return "-ERR MULTI calls can not be nested\r\n"
@@ -39,7 +38,6 @@ func (h *CommandHandler) Handle(command Command) string {
 		}
 
 		return h.handleExec()
-	
 
 	case Discard:
 		if !h.tx.active {
@@ -49,9 +47,12 @@ func (h *CommandHandler) Handle(command Command) string {
 		h.tx.active = false
 		h.tx.queue = nil
 		return "+OK\r\n"
+	case Watch:
+		if h.tx.active{
+			return "-ERR WATCH inside MULTI"
+		}
+		return h.handleWatched(cmd)
 	}
-	
-
 	if h.tx.active {
 		h.tx.queue = append(h.tx.queue, command)
 		return "+QUEUED\r\n"
@@ -171,6 +172,13 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
+func (h *CommandHandler) handleWatched(cmd Watch) string{
+	for _, key := range cmd.Keys{
+		h.watched[key] = h.store.versions[key]
+	}
+	return "+OK\r\n"
+}
+
 func generateStreamID(requested string, last *StreamID) (StreamID, error) {
 
 	if requested == "*" {
@@ -284,16 +292,16 @@ func (h *CommandHandler) handleXrange(cmd Xrange) string {
 }
 
 func (h *CommandHandler) handleExec() string {
-    queued := h.tx.queue
-    h.tx.active = false
-    h.tx.queue = nil
+	queued := h.tx.queue
+	h.tx.active = false
+	h.tx.queue = nil
 
-    replies := make([]string, 0, len(queued))
-    for _, queuedCommand := range queued {
-        replies = append(replies, h.Handle(queuedCommand))
-    }
+	replies := make([]string, 0, len(queued))
+	for _, queuedCommand := range queued {
+		replies = append(replies, h.Handle(queuedCommand))
+	}
 
-    return fmt.Sprintf("*%d\r\n%s", len(replies), strings.Join(replies, ""))
+	return fmt.Sprintf("*%d\r\n%s", len(replies), strings.Join(replies, ""))
 }
 
 func (h *CommandHandler) handleXread(cmd Xread) string {

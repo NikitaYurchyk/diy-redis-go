@@ -11,7 +11,8 @@ func handleClient(conn net.Conn, store *Store) {
 
 	reader := bufio.NewReader(conn)
 	writer := bufio.NewWriter(conn)
-	handler := CommandHandler{store: store}
+	watched := make(map[string]uint64)
+	handler := CommandHandler{store: store, watched: watched}
 
 	defer func() {
 		fmt.Printf("Client disconnected: %s\n", conn.RemoteAddr())

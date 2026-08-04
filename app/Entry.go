@@ -59,6 +59,7 @@ type Store struct {
 	db            map[string]Entry
 	waiters       map[string][]*waiter
 	streamWaiters map[string][]*streamWaiter
+	versions      map[string]uint64
 }
 
 func NewStore() *Store {
@@ -66,5 +67,6 @@ func NewStore() *Store {
 		db:            make(map[string]Entry),
 		waiters:       make(map[string][]*waiter),
 		streamWaiters: make(map[string][]*streamWaiter),
+		versions:      make(map[string]uint64),
 	}
 }
