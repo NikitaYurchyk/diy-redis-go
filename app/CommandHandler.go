@@ -145,6 +145,7 @@ func (h *CommandHandler) handleSet(cmd Set) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
+	h.incrVersion(cmd.Key)
 	return "+OK\r\n"
 }
 
@@ -168,11 +169,14 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	list.Values = append(list.Values, cmd.Values...)
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
+	h.incrVersion(cmd.Key)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
 
 func (h *CommandHandler) handleWatched(cmd Watch) string{
+	h.store.mu.Lock()
+	defer h.store.mu.Unlock()
 	for _, key := range cmd.Keys{
 		h.watched[key] = h.store.versions[key]
 	}
@@ -465,6 +469,7 @@ func (h *CommandHandler) handleXadd(cmd Xadd) string {
 
 	entry.Value = stream
 	h.store.db[cmd.Key] = entry
+	h.incrVersion(cmd.Key)
 	h.notifyStreamWaiters(cmd.Key, newEntry)
 	idString := fmt.Sprintf("%d-%d", id.Millis, id.Seq)
 	return BulkString(idString)
@@ -479,6 +484,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 	if !exists {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
+		h.incrVersion(cmd.Key)
 		return ":1\r\n"
 	}
 
@@ -491,6 +497,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		n++
 		entry.Value = StringValue{Value: strconv.FormatInt(n, 10)}
 		h.store.db[cmd.Key] = entry
+		h.incrVersion(cmd.Key)
 		return fmt.Sprintf(":%d\r\n", n)
 	default:
 		return "-ERR value is not an integer or out of range\r\n"
@@ -515,6 +522,7 @@ func (h *CommandHandler) handleLPush(cmd LPush) string {
 	}
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
+	h.incrVersion(cmd.Key)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(":%d\r\n", len(list.Values))
 }
@@ -565,6 +573,7 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 		}
 		entry.Value = list
 		h.store.db[key] = entry
+		h.incrVersion(key)
 		return BulkString(item)
 	}
 
@@ -584,6 +593,9 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 	}
 	entry.Value = list
 	h.store.db[key] = entry
+	if len(items) > 0 {
+		h.incrVersion(key)
+	}
 	return buildArray(items)
 }
 
@@ -623,6 +635,7 @@ func (h *CommandHandler) handleBLPop(cmd BLPop) string {
 			list.Values = list.Values[1:]
 			entry.Value = list
 			h.store.db[cmd.Key] = entry
+			h.incrVersion(cmd.Key)
 			h.store.mu.Unlock()
 			return popResponse(cmd.Key, item)
 		}
@@ -668,6 +681,7 @@ func (h *CommandHandler) notifyWaiters(key string) {
 		list.Values = list.Values[1:]
 		entry.Value = list
 		h.store.db[key] = entry
+		h.incrVersion(key)
 		w.result <- popResult{key: key, item: item}
 		return
 	}
@@ -707,19 +721,26 @@ func buildArray(items []string) string {
 	return response
 }
 
+func (h *CommandHandler) incrVersion(key string){
+	h.store.versions[key]++
+}
+
 func popResponse(key, item string) string { return buildArray([]string{key, item}) }
+
 func min(left, right int) int {
 	if left < right {
 		return left
 	}
 	return right
 }
+
 func max(left, right int) int {
 	if left > right {
 		return left
 	}
 	return right
 }
+
 func (h *CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
 	for _, waiter := range h.store.streamWaiters[key] {
 		select {
