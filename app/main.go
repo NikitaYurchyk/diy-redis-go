@@ -41,8 +41,8 @@ func handleClient(conn net.Conn, store *Store) {
 	}
 }
 
-func startReplication(host string, port int) {
-	addr := net.JoinHostPort(host, strconv.Itoa(port))
+func handleReplica(masterHost string, masterPort, listeningPort int) {
+	addr := net.JoinHostPort(masterHost, strconv.Itoa(masterPort))
 
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
@@ -53,17 +53,25 @@ func startReplication(host string, port int) {
 
 	reader := bufio.NewReader(conn)
 
-	if _, err := conn.Write([]byte(buildArray([]string{"PING"}))); err != nil {
-		fmt.Printf("Error sending PING to master: %v\n", err)
-		return
+	steps := [][]string{
+		{"PING"},
+		{"REPLCONF", "listening-port", strconv.Itoa(listeningPort)},
+		{"REPLCONF", "capa", "psync2"},
 	}
 
-	reply, err := readLine(reader)
-	if err != nil {
-		fmt.Printf("Error reading PING reply: %v\n", err)
-		return
+	for _, step := range steps {
+		if _, err := conn.Write([]byte(buildArray(step))); err != nil {
+			fmt.Printf("Error sending %s to master: %v\n", step[0], err)
+			return
+		}
+
+		reply, err := readLine(reader)
+		if err != nil {
+			fmt.Printf("Error reading %s reply: %v\n", step[0], err)
+			return
+		}
+		fmt.Printf("Master replied to %s: %s\n", step[0], reply)
 	}
-	fmt.Printf("Master replied to PING: %s\n", reply)
 
 }
 func main() {
@@ -95,9 +103,8 @@ func main() {
 		store.info.Replication.Role = RoleSlave
 		store.info.Replication.MasterHost = fields[0]
 		store.info.Replication.MasterPort = masterPort
-		go startReplication(store.info.Replication.MasterHost, store.info.Replication.MasterPort)
+		go handleReplica(store.info.Replication.MasterHost, store.info.Replication.MasterPort, *port)
 	}
-	
 
 	for {
 		conn, err := listener.Accept()
