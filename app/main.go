@@ -57,6 +57,7 @@ func handleReplica(masterHost string, masterPort, listeningPort int) {
 		{"PING"},
 		{"REPLCONF", "listening-port", strconv.Itoa(listeningPort)},
 		{"REPLCONF", "capa", "psync2"},
+		{"PSYNC", "?", "-1"},
 	}
 
 	for _, step := range steps {
