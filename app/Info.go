@@ -1,5 +1,10 @@
 package main
 
+import (
+	"fmt"
+	"strings"
+)
+
 type RoleType string
 
 const (
@@ -17,6 +22,23 @@ type Replication struct {
 	ReplBacklogSize            uint64
 	ReplBacklogFirstByteOffset uint64
 	ReplBacklogHistlen         uint64
+}
+
+func (r *Replication) RespReplication() string {
+	lines := []string{
+		"# Replication",
+		fmt.Sprintf("role:%s", r.Role),
+		fmt.Sprintf("connected_slaves:%d", r.ConnectedSlaves),
+		fmt.Sprintf("master_replid:%s", r.MasterReplID),
+		fmt.Sprintf("master_repl_offset:%d", r.MasterReplOffset),
+		fmt.Sprintf("second_repl_offset:%d", r.SecondReplOffset),
+		fmt.Sprintf("repl_backlog_active:%d", r.ReplBacklogActive),
+		fmt.Sprintf("repl_backlog_size:%d", r.ReplBacklogSize),
+		fmt.Sprintf("repl_backlog_first_byte_offset:%d", r.ReplBacklogFirstByteOffset),
+		fmt.Sprintf("repl_backlog_histlen:%d", r.ReplBacklogHistlen),
+	}
+
+	return strings.Join(lines, crlf)
 }
 
 type Info struct {

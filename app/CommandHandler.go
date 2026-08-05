@@ -127,7 +127,7 @@ func (h *CommandHandler) handleGet(cmd Get) string {
 
 func (h *CommandHandler) handleInfo(cmd InfoCMD) string {
 	if cmd.Type == ReplicOpt {
-		return BulkString("role:" + string(h.store.info.Replication.Role))
+		return BulkString(h.store.info.Replication.RespReplication())
 	}
 	return respNullBulkString
 }
