@@ -1,9 +1,14 @@
 package main
 
 import (
-	"strconv"
 	"strings"
 	"time"
+)
+
+type InfoOption string
+
+const (
+	ReplicOpt InfoOption = "replication"
 )
 
 type Command interface {
@@ -15,7 +20,6 @@ type Xadd struct {
 	ID     string
 	Fields []string
 }
-
 type Xrange struct {
 	Key   string
 	BegID string
@@ -66,19 +70,16 @@ type BLPop struct {
 	Key     string
 	Timeout float64
 }
-
-type Incr struct {
-	Key string
+type InfoCMD struct {
+	Type InfoOption
 }
 
+type Incr struct{ Key string }
 type Multi struct{}
 type Exec struct{}
 type Discard struct{}
-type Watch struct {
-	Keys []string
-}
+type Watch struct{ Keys []string }
 type Unwatch struct{}
-
 type Unknown struct{ Name string }
 
 func (Discard) isCommand() {}
@@ -103,9 +104,15 @@ func (BLPop) isCommand()   {}
 func (Unknown) isCommand() {}
 func (Multi) isCommand()   {}
 func (Unwatch) isCommand() {}
+func (InfoCMD) isCommand() {}
 
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
+	case "INFO":
+		return InfoCMD{
+			Type: ReplicOpt,
+		}
+
 	case "MULTI":
 		return Multi{}
 
@@ -132,7 +139,7 @@ func ParseCommand(parts []string) Command {
 		}
 		streams := createArrOfStreams(parts[2:])
 		return Xread{Streams: streams, Block: -1}
-	
+
 	case "UNWATCH":
 		return Unwatch{}
 
@@ -178,46 +185,4 @@ func ParseCommand(parts []string) Command {
 	default:
 		return Unknown{Name: parts[0]}
 	}
-}
-
-func parseExpiry(parts []string) *time.Time {
-	for i := 3; i < len(parts); i++ {
-		switch strings.ToUpper(parts[i]) {
-		case "EX":
-			expiry := time.Now().Add(time.Duration(parseInt64(parts[i+1])) * time.Second)
-			return &expiry
-		case "PX":
-			expiry := time.Now().Add(time.Duration(parseInt64(parts[i+1])) * time.Millisecond)
-			return &expiry
-		}
-	}
-	return nil
-}
-
-func parseOptionalInt(parts []string, index int) *int {
-	if len(parts) <= index {
-		return nil
-	}
-	value := parseInt(parts[index])
-	return &value
-}
-
-func parseInt(value string) int { result, _ := strconv.Atoi(value); return result }
-
-func parseInt64(value string) int64 { result, _ := strconv.ParseInt(value, 10, 64); return result }
-
-func parseFloat(value string) float64 { result, _ := strconv.ParseFloat(value, 64); return result }
-
-func createArrOfStreams(args []string) []XreadStream {
-	count := len(args) / 2
-	streams := make([]XreadStream, count)
-
-	for i := 0; i < count; i++ {
-		streams[i] = XreadStream{
-			Key: args[i],
-			ID:  args[count+i],
-		}
-	}
-
-	return streams
 }

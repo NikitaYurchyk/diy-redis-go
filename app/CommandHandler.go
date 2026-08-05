@@ -2,13 +2,10 @@ package main
 
 import (
 	"fmt"
-	"math"
 	"strconv"
 	"strings"
 	"time"
 )
-
-const wrongType = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
 
 type Transaction struct {
 	active bool
@@ -25,51 +22,55 @@ func (h *CommandHandler) Handle(command Command) string {
 	switch cmd := command.(type) {
 	case Multi:
 		if h.tx.active {
-			return "-ERR MULTI calls can not be nested\r\n"
+			return errNestedMulti
 		}
 
 		h.tx.active = true
 		h.tx.queue = nil
-		return "+OK\r\n"
+		return respOK
 
 	case Exec:
 		if !h.tx.active {
-			return "-ERR EXEC without MULTI\r\n"
+			return errExecNoMulti
 		}
 		return h.handleExec()
 
 	case Discard:
 		if !h.tx.active {
-			return "-ERR DISCARD without MULTI\r\n"
+			return errDiscardNoMulti
 		}
 
 		h.tx.active = false
 		h.tx.queue = nil
 		clear(h.watched)
-		return "+OK\r\n"
-	
+		return respOK
+
 	case Watch:
 		if h.tx.active {
-			return "-ERR WATCH inside MULTI is not allowed\r\n"
+			return errWatchInMulti
 		}
 		return h.handleWatched(cmd)
-	
+
 	case Unwatch:
 		return h.handleUnwatch(cmd)
 	}
 
 	if h.tx.active {
 		h.tx.queue = append(h.tx.queue, command)
-		return "+QUEUED\r\n"
+		return respQueued
 	}
 
+	return h.exec(command)
+}
+
+func (h *CommandHandler) exec(command Command) string {
 	switch cmd := command.(type) {
 	case Xread:
 		return h.handleXread(cmd)
 	case Multi:
 		return h.handleMulti(cmd)
 	case Ping:
-		return "+PONG\r\n"
+		return respPong
 	case Echo:
 		return BulkString(cmd.Message)
 	case Get:
@@ -98,10 +99,12 @@ func (h *CommandHandler) Handle(command Command) string {
 		return h.handleXrange(cmd)
 	case Incr:
 		return h.handleIncr(cmd)
+	case InfoCMD:
+		return h.handleInfo(cmd)
 	case Unknown:
-		return fmt.Sprintf("-ERR unknown command '%s'\r\n", cmd.Name)
+		return fmt.Sprintf(errUnknownCommandFormat, cmd.Name)
 	default:
-		return "-ERR unknown command\r\n"
+		return errUnknownCommand
 	}
 }
 
@@ -114,12 +117,19 @@ func (h *CommandHandler) handleGet(cmd Get) string {
 		if exists {
 			delete(h.store.db, cmd.Key)
 		}
-		return "$-1\r\n"
+		return respNullBulkString
 	}
 	if value, ok := entry.Value.(StringValue); ok {
 		return BulkString(value.Value)
 	}
 	return wrongType
+}
+
+func (h *CommandHandler) handleInfo(cmd InfoCMD) string {
+	if cmd.Type == ReplicOpt {
+		return BulkString("role:" + string(h.store.info.Replication.Role))
+	}
+	return respNullBulkString
 }
 
 func (h *CommandHandler) handleType(cmd Type) string {
@@ -131,18 +141,18 @@ func (h *CommandHandler) handleType(cmd Type) string {
 		if exists {
 			delete(h.store.db, cmd.Key)
 		}
-		return "+none\r\n"
+		return respTypeNone
 	}
 
 	switch entry.Value.(type) {
 	case StringValue:
-		return "+string\r\n"
+		return respTypeString
 	case ListValue:
-		return "+list\r\n"
+		return respTypeList
 	case StreamValue:
-		return "+stream\r\n"
+		return respTypeStream
 	default:
-		return "+none\r\n"
+		return respTypeNone
 	}
 }
 
@@ -151,12 +161,12 @@ func (h *CommandHandler) handleSet(cmd Set) string {
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
 	h.incrVersion(cmd.Key)
-	return "+OK\r\n"
+	return respOK
 }
 
 func (h *CommandHandler) handleMulti(cmd Multi) string {
 	h.tx.active = true
-	return "+OK\r\n"
+	return respOK
 }
 
 func (h *CommandHandler) handleRPush(cmd RPush) string {
@@ -176,7 +186,7 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
 	h.notifyWaiters(cmd.Key)
-	return fmt.Sprintf(":%d\r\n", len(list.Values))
+	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
 
 func (h *CommandHandler) handleWatched(cmd Watch) string {
@@ -185,86 +195,14 @@ func (h *CommandHandler) handleWatched(cmd Watch) string {
 	for _, key := range cmd.Keys {
 		h.watched[key] = h.store.versions[key]
 	}
-	return "+OK\r\n"
+	return respOK
 }
 
-func (h *CommandHandler) handleUnwatch(cmd Unwatch) string{
+func (h *CommandHandler) handleUnwatch(cmd Unwatch) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 	clear(h.watched)
-	return "+OK\r\n" 
-}
-
-func generateStreamID(requested string, last *StreamID) (StreamID, error) {
-
-	if requested == "*" {
-		now := time.Now().UnixMilli()
-
-		if last != nil && now <= last.Millis {
-			return StreamID{
-				Millis: last.Millis,
-				Seq:    last.Seq + 1,
-			}, nil
-		}
-
-		return StreamID{
-			Millis: now,
-			Seq:    0,
-		}, nil
-	}
-
-	parts := strings.SplitN(requested, "-", 2)
-	if len(parts) != 2 {
-		return StreamID{}, fmt.Errorf("invalid stream ID")
-	}
-
-	millis, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return StreamID{}, fmt.Errorf("invalid stream ID")
-	}
-
-	if parts[1] == "*" {
-		if last != nil {
-			if millis < last.Millis {
-				return StreamID{}, fmt.Errorf("The ID specified in XADD is equal or smaller than the target stream top item")
-			}
-
-			if millis == last.Millis {
-				return StreamID{
-					Millis: millis,
-					Seq:    last.Seq + 1,
-				}, nil
-			}
-		}
-
-		sequence := int64(0)
-		if millis == 0 {
-			sequence = 1
-		}
-
-		return StreamID{
-			Millis: millis,
-			Seq:    sequence,
-		}, nil
-	}
-
-	seq, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return StreamID{}, fmt.Errorf("invalid stream ID")
-	}
-
-	id := StreamID{Millis: millis, Seq: seq}
-	if id.Millis == 0 && id.Seq == 0 {
-		return StreamID{}, fmt.Errorf("The ID specified in XADD must be greater than 0-0")
-	}
-
-	if last != nil &&
-		(id.Millis < last.Millis ||
-			(id.Millis == last.Millis && id.Seq <= last.Seq)) {
-		return StreamID{}, fmt.Errorf("The ID specified in XADD is equal or smaller than the target stream top item")
-	}
-
-	return id, nil
+	return respOK
 }
 
 func (h *CommandHandler) handleXrange(cmd Xrange) string {
@@ -273,7 +211,7 @@ func (h *CommandHandler) handleXrange(cmd Xrange) string {
 
 	entry, exists := h.store.db[cmd.Key]
 	if !exists {
-		return "*0\r\n"
+		return respEmptyArray
 	}
 
 	stream, ok := entry.Value.(StreamValue)
@@ -281,30 +219,17 @@ func (h *CommandHandler) handleXrange(cmd Xrange) string {
 		return wrongType
 	}
 
-	start, err := parseRangeID(cmd.BegID)
+	start, err := ParseStreamID(cmd.BegID)
 	if err != nil {
-		return "-ERR invalid stream ID\r\n"
+		return errInvalidStream
 	}
 
-	end, err := parseRangeID(cmd.EndID)
+	end, err := ParseStreamID(cmd.EndID)
 	if err != nil {
-		return "-ERR invalid stream ID\r\n"
+		return errInvalidStream
 	}
 
-	var entries []StreamEntry
-
-	for _, streamEntry := range stream.Entries {
-		if compareStreamIDs(streamEntry.ID, start) < 0 {
-			continue
-		}
-		if compareStreamIDs(streamEntry.ID, end) > 0 {
-			break
-		}
-
-		entries = append(entries, streamEntry)
-	}
-
-	return buildXRangeResponse(entries)
+	return buildXRangeResponse(stream.Range(start, end))
 }
 
 func (h *CommandHandler) handleExec() string {
@@ -313,12 +238,11 @@ func (h *CommandHandler) handleExec() string {
 	h.tx.queue = nil
 	defer clear(h.watched)
 
-
 	for key, version := range h.watched {
 		if h.store.versions[key] != version {
-			return "*-1\r\n"
+			return respNullArray
 		}
-		
+
 	}
 
 	replies := make([]string, 0, len(queued))
@@ -326,7 +250,7 @@ func (h *CommandHandler) handleExec() string {
 		replies = append(replies, h.Handle(queuedCommand))
 	}
 
-	return fmt.Sprintf("*%d\r\n%s", len(replies), strings.Join(replies, ""))
+	return fmt.Sprintf(respArrayHeaderFormat+"%s", len(replies), strings.Join(replies, ""))
 }
 
 func (h *CommandHandler) handleXread(cmd Xread) string {
@@ -347,38 +271,33 @@ func (h *CommandHandler) handleXread(cmd Xread) string {
 				return wrongType
 			}
 
-			id, err := parseRangeID(request.ID)
+			id, err := ParseStreamID(request.ID)
 			if err != nil {
 				h.store.mu.Unlock()
-				return "-ERR invalid stream ID\r\n"
+				return errInvalidStream
 			}
 
-			entries := make([]StreamEntry, 0)
-			for _, streamEntry := range stream.Entries {
-				if compareStreamIDs(streamEntry.ID, id) > 0 {
-					entries = append(entries, streamEntry)
-				}
-			}
+			entries := stream.After(id)
 			if len(entries) == 0 {
 				continue
 			}
 
-			results += "*2\r\n" + BulkString(request.Key) + buildXRangeResponse(entries)
+			results += respArrayOf2 + BulkString(request.Key) + buildXRangeResponse(entries)
 			count++
 		}
 		if count > 0 {
 			h.store.mu.Unlock()
-			return fmt.Sprintf("*%d\r\n%s", count, results)
+			return fmt.Sprintf(respArrayHeaderFormat+"%s", count, results)
 		}
 	}
 	if cmd.Block == -1 {
 		h.store.mu.Unlock()
-		return "*0\r\n"
+		return respEmptyArray
 	}
 
 	wait := make(chan streamResult, 1)
 	for _, request := range cmd.Streams {
-		id, _ := parseRangeID(request.ID)
+		id, _ := ParseStreamID(request.ID)
 		streamWaiter := &streamWaiter{id: id, result: wait}
 		h.store.streamWaiters[request.Key] = append(h.store.streamWaiters[request.Key], streamWaiter)
 	}
@@ -391,71 +310,11 @@ func (h *CommandHandler) handleXread(cmd Xread) string {
 		select {
 		case result = <-wait:
 		case <-time.After(cmd.Block):
-			return "*-1\r\n"
+			return respNullArray
 		}
 	}
 
-	return "*1\r\n*2\r\n" + BulkString(result.key) + buildXRangeResponse([]StreamEntry{result.entry})
-}
-
-func parseRangeID(value string) (StreamID, error) {
-	if value == "-" {
-		return StreamID{Millis: 0, Seq: 0}, nil
-	}
-
-	if value == "+" {
-		return StreamID{
-			Millis: math.MaxInt64,
-			Seq:    math.MaxInt64,
-		}, nil
-	}
-
-	parts := strings.SplitN(value, "-", 2)
-	if len(parts) != 2 {
-		return StreamID{}, fmt.Errorf("invalid stream ID")
-	}
-
-	millis, err := strconv.ParseInt(parts[0], 10, 64)
-	if err != nil {
-		return StreamID{}, err
-	}
-
-	seq, err := strconv.ParseInt(parts[1], 10, 64)
-	if err != nil {
-		return StreamID{}, err
-	}
-
-	return StreamID{Millis: millis, Seq: seq}, nil
-}
-
-func compareStreamIDs(left, right StreamID) int {
-	if left.Millis < right.Millis {
-		return -1
-	}
-	if left.Millis > right.Millis {
-		return 1
-	}
-	if left.Seq < right.Seq {
-		return -1
-	}
-	if left.Seq > right.Seq {
-		return 1
-	}
-	return 0
-}
-
-func buildXRangeResponse(entries []StreamEntry) string {
-	response := fmt.Sprintf("*%d\r\n", len(entries))
-
-	for _, entry := range entries {
-		id := fmt.Sprintf("%d-%d", entry.ID.Millis, entry.ID.Seq)
-
-		response += "*2\r\n"
-		response += BulkString(id)
-		response += buildArray(entry.Fields)
-	}
-
-	return response
+	return respArrayOf1 + respArrayOf2 + BulkString(result.key) + buildXRangeResponse([]StreamEntry{result.entry})
 }
 
 func (h *CommandHandler) handleXadd(cmd Xadd) string {
@@ -472,14 +331,9 @@ func (h *CommandHandler) handleXadd(cmd Xadd) string {
 		return wrongType
 	}
 
-	var last *StreamID
-	if len(stream.Entries) > 0 {
-		last = &stream.Entries[len(stream.Entries)-1].ID
-	}
-
-	id, err := generateStreamID(cmd.ID, last)
+	id, err := stream.NextID(cmd.ID)
 	if err != nil {
-		return fmt.Sprintf("-ERR %s\r\n", err)
+		return fmt.Sprintf(errFormat, err)
 	}
 
 	newEntry := StreamEntry{
@@ -492,8 +346,7 @@ func (h *CommandHandler) handleXadd(cmd Xadd) string {
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
 	h.notifyStreamWaiters(cmd.Key, newEntry)
-	idString := fmt.Sprintf("%d-%d", id.Millis, id.Seq)
-	return BulkString(idString)
+	return BulkString(id.String())
 }
 
 func (h *CommandHandler) handleIncr(cmd Incr) string {
@@ -506,22 +359,22 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
-		return ":1\r\n"
+		return respOne
 	}
 
 	switch value := entry.Value.(type) {
 	case StringValue:
 		n, err := strconv.ParseInt(value.Value, 10, 64)
 		if err != nil {
-			return "-ERR value is not an integer or out of range\r\n"
+			return errNotAnInteger
 		}
 		n++
 		entry.Value = StringValue{Value: strconv.FormatInt(n, 10)}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
-		return fmt.Sprintf(":%d\r\n", n)
+		return fmt.Sprintf(respIntegerFormat, n)
 	default:
-		return "-ERR value is not an integer or out of range\r\n"
+		return errNotAnInteger
 	}
 
 }
@@ -545,7 +398,7 @@ func (h *CommandHandler) handleLPush(cmd LPush) string {
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
 	h.notifyWaiters(cmd.Key)
-	return fmt.Sprintf(":%d\r\n", len(list.Values))
+	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
 
 func (h *CommandHandler) handleLLen(cmd LLen) string {
@@ -554,10 +407,10 @@ func (h *CommandHandler) handleLLen(cmd LLen) string {
 
 	entry, exists := h.store.db[cmd.Key]
 	if !exists {
-		return ":0\r\n"
+		return respZero
 	}
 	if list, ok := entry.Value.(ListValue); ok {
-		return fmt.Sprintf(":%d\r\n", len(list.Values))
+		return fmt.Sprintf(respIntegerFormat, len(list.Values))
 	}
 	return wrongType
 }
@@ -573,9 +426,9 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 	entry, exists := h.store.db[key]
 	if !exists {
 		if count == nil {
-			return "$-1\r\n"
+			return respNullBulkString
 		}
-		return "*0\r\n"
+		return respEmptyArray
 	}
 	list, ok := entry.Value.(ListValue)
 	if !ok {
@@ -583,7 +436,7 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 	}
 	if count == nil {
 		if len(list.Values) == 0 {
-			return "$-1\r\n"
+			return respNullBulkString
 		}
 		var item string
 		if fromLeft {
@@ -626,7 +479,7 @@ func (h *CommandHandler) handleLRange(cmd LRange) string {
 
 	entry, exists := h.store.db[cmd.Key]
 	if !exists {
-		return "*0\r\n"
+		return respEmptyArray
 	}
 	list, ok := entry.Value.(ListValue)
 	if !ok {
@@ -643,7 +496,7 @@ func (h *CommandHandler) handleLRange(cmd LRange) string {
 		end = min(end, size-1)
 	}
 	if size == 0 || start > end {
-		return "*0\r\n"
+		return respEmptyArray
 	}
 	return buildArray(list.Values[start : end+1])
 }
@@ -676,7 +529,7 @@ func (h *CommandHandler) handleBLPop(cmd BLPop) string {
 		return popResponse(result.key, result.item)
 	case <-time.After(time.Duration(cmd.Timeout * float64(time.Second))):
 		h.removeWaiter(w)
-		return "*-1\r\n"
+		return respNullArray
 	}
 }
 
@@ -734,32 +587,8 @@ func (h *CommandHandler) removeWaiterLocked(w *waiter) {
 	}
 }
 
-func buildArray(items []string) string {
-	response := fmt.Sprintf("*%d\r\n", len(items))
-	for _, item := range items {
-		response += BulkString(item)
-	}
-	return response
-}
-
 func (h *CommandHandler) incrVersion(key string) {
 	h.store.versions[key]++
-}
-
-func popResponse(key, item string) string { return buildArray([]string{key, item}) }
-
-func min(left, right int) int {
-	if left < right {
-		return left
-	}
-	return right
-}
-
-func max(left, right int) int {
-	if left > right {
-		return left
-	}
-	return right
 }
 
 func (h *CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {

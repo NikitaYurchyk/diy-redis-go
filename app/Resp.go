@@ -1,0 +1,83 @@
+package main
+
+import (
+	"bufio"
+	"fmt"
+	"strings"
+)
+
+// Every raw RESP byte sequence lives here.
+
+// crlf terminates every RESP line, on the way in and on the way out.
+const crlf = "\r\n"
+
+// Fixed replies.
+const (
+	respOK     = "+OK\r\n"
+	respPong   = "+PONG\r\n"
+	respQueued = "+QUEUED\r\n"
+
+	respNullBulkString = "$-1\r\n"
+	respNullArray      = "*-1\r\n"
+	respEmptyArray     = "*0\r\n"
+	respZero           = ":0\r\n"
+	respOne            = ":1\r\n"
+
+	respArrayOf1 = "*1\r\n"
+	respArrayOf2 = "*2\r\n"
+)
+
+// TYPE replies.
+const (
+	respTypeNone   = "+none\r\n"
+	respTypeString = "+string\r\n"
+	respTypeList   = "+list\r\n"
+	respTypeStream = "+stream\r\n"
+)
+
+// Errors.
+const (
+	wrongType         = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
+	errNotAnInteger   = "-ERR value is not an integer or out of range\r\n"
+	errInvalidStream  = "-ERR invalid stream ID\r\n"
+	errUnknownCommand = "-ERR unknown command\r\n"
+	errNestedMulti    = "-ERR MULTI calls can not be nested\r\n"
+	errExecNoMulti    = "-ERR EXEC without MULTI\r\n"
+	errDiscardNoMulti = "-ERR DISCARD without MULTI\r\n"
+	errWatchInMulti   = "-ERR WATCH inside MULTI is not allowed\r\n"
+)
+
+// Format strings for replies whose contents vary.
+const (
+	respBulkStringFormat  = "$%d\r\n%s\r\n"
+	respIntegerFormat     = ":%d\r\n"
+	respArrayHeaderFormat = "*%d\r\n"
+
+	errFormat               = "-ERR %s\r\n"
+	errUnknownCommandFormat = "-ERR unknown command '%s'\r\n"
+)
+
+func buildArray(items []string) string {
+	response := fmt.Sprintf(respArrayHeaderFormat, len(items))
+	for _, item := range items {
+		response += BulkString(item)
+	}
+	return response
+}
+
+func popResponse(key, item string) string { return buildArray([]string{key, item}) }
+
+func BulkString(data string) string {
+	return fmt.Sprintf(respBulkStringFormat, len(data), data)
+}
+
+func readLine(reader *bufio.Reader) (string, error) {
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasSuffix(line, crlf) {
+		return "", fmt.Errorf("RESP line missing CRLF")
+	}
+	return strings.TrimSuffix(line, crlf), nil
+}

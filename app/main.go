@@ -53,6 +53,7 @@ func main() {
 	defer listener.Close()
 
 	store := NewStore()
+	store.info = InitInfo()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

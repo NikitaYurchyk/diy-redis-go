@@ -6,6 +6,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"time"
 )
 
 func ParseArray(reader *bufio.Reader) ([]string, error) {
@@ -52,23 +53,36 @@ func ParseBulkString(reader *bufio.Reader) (string, error) {
 	if _, err := io.ReadFull(reader, data); err != nil {
 		return "", err
 	}
-	if string(data[length:]) != "\r\n" {
+	if string(data[length:]) != crlf {
 		return "", fmt.Errorf("bulk string missing CRLF")
 	}
 	return string(data[:length]), nil
 }
 
-func BulkString(data string) string {
-	return fmt.Sprintf("$%d\r\n%s\r\n", len(data), data)
+func parseExpiry(parts []string) *time.Time {
+	for i := 3; i < len(parts); i++ {
+		switch strings.ToUpper(parts[i]) {
+		case "EX":
+			expiry := time.Now().Add(time.Duration(parseInt64(parts[i+1])) * time.Second)
+			return &expiry
+		case "PX":
+			expiry := time.Now().Add(time.Duration(parseInt64(parts[i+1])) * time.Millisecond)
+			return &expiry
+		}
+	}
+	return nil
 }
 
-func readLine(reader *bufio.Reader) (string, error) {
-	line, err := reader.ReadString('\n')
-	if err != nil {
-		return "", err
+func parseOptionalInt(parts []string, index int) *int {
+	if len(parts) <= index {
+		return nil
 	}
-	if !strings.HasSuffix(line, "\r\n") {
-		return "", fmt.Errorf("RESP line missing CRLF")
-	}
-	return strings.TrimSuffix(line, "\r\n"), nil
+	value := parseInt(parts[index])
+	return &value
 }
+
+func parseInt(value string) int { result, _ := strconv.Atoi(value); return result }
+
+func parseInt64(value string) int64 { result, _ := strconv.ParseInt(value, 10, 64); return result }
+
+func parseFloat(value string) float64 { result, _ := strconv.ParseFloat(value, 64); return result }

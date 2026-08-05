@@ -9,26 +9,11 @@ type RedisValue interface {
 	isRedisValue()
 }
 
-type StreamID struct {
-	Millis int64
-	Seq    int64
-}
-
-type StreamEntry struct {
-	ID     StreamID
-	Fields []string
-}
-
-type StreamValue struct {
-	Entries []StreamEntry
-}
-
 type StringValue struct{ Value string }
 type ListValue struct{ Values []string }
 
 func (StringValue) isRedisValue() {}
 func (ListValue) isRedisValue()   {}
-func (StreamValue) isRedisValue() {}
 
 type Entry struct {
 	Value  RedisValue
@@ -60,6 +45,7 @@ type Store struct {
 	waiters       map[string][]*waiter
 	streamWaiters map[string][]*streamWaiter
 	versions      map[string]uint64
+	info          *Info
 }
 
 func NewStore() *Store {
