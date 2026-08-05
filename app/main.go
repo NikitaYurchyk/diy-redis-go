@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"flag"
 	"fmt"
 	"net"
 )
@@ -39,7 +40,13 @@ func handleClient(conn net.Conn, store *Store) {
 }
 
 func main() {
-	listener, err := net.Listen("tcp", ":6379")
+	port := flag.Int("port", 6379, "port to listen on")
+	flag.Parse()
+
+	addr := fmt.Sprintf(":%d", *port)
+
+	listener, err := net.Listen("tcp", addr)
+
 	if err != nil {
 		panic(err)
 	}
