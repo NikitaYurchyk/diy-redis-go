@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 )
 
@@ -40,6 +41,31 @@ func handleClient(conn net.Conn, store *Store) {
 	}
 }
 
+func startReplication(host string, port int) {
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		fmt.Printf("Error connecting to master %s: %v\n", addr, err)
+		return
+	}
+	defer conn.Close()
+
+	reader := bufio.NewReader(conn)
+
+	if _, err := conn.Write([]byte(buildArray([]string{"PING"}))); err != nil {
+		fmt.Printf("Error sending PING to master: %v\n", err)
+		return
+	}
+
+	reply, err := readLine(reader)
+	if err != nil {
+		fmt.Printf("Error reading PING reply: %v\n", err)
+		return
+	}
+	fmt.Printf("Master replied to PING: %s\n", reply)
+
+}
 func main() {
 	port := flag.Int("port", 6379, "port to listen on")
 	replicaOf := flag.String("replicaof", "", "master to replicate, as \"<host> <port>\"")
@@ -61,8 +87,17 @@ func main() {
 		if len(fields) != 2 {
 			panic("--replicaof needs \"<host> <port>\"")
 		}
+		masterPort, err := strconv.Atoi(fields[1])
+		if err != nil {
+			panic("--replicaof port is not a number: " + fields[1])
+		}
+
 		store.info.Replication.Role = RoleSlave
+		store.info.Replication.MasterHost = fields[0]
+		store.info.Replication.MasterPort = masterPort
+		go startReplication(store.info.Replication.MasterHost, store.info.Replication.MasterPort)
 	}
+	
 
 	for {
 		conn, err := listener.Accept()

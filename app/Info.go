@@ -22,6 +22,8 @@ type Replication struct {
 	ReplBacklogSize            uint64
 	ReplBacklogFirstByteOffset uint64
 	ReplBacklogHistlen         uint64
+	MasterHost                 string
+	MasterPort                 int
 }
 
 func (r *Replication) RespReplication() string {
@@ -52,6 +54,7 @@ func InitInfo() *Info {
 			MasterReplID:     "8371b4fb1155b71f4a04d3e1bc3e18c4a990aeeb",
 			SecondReplOffset: -1,
 			ReplBacklogSize:  1048576,
+		
 		},
 	}
 }
