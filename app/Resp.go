@@ -55,6 +55,7 @@ const (
 
 	errFormat               = "-ERR %s\r\n"
 	errUnknownCommandFormat = "-ERR unknown command '%s'\r\n"
+	respFullResyncFormat = "+FULLRESYNC %s %d\r\n"
 )
 
 
@@ -68,6 +69,10 @@ func buildArray(items []string) string {
 }
 
 func popResponse(key, item string) string { return buildArray([]string{key, item}) }
+
+func FullResync(replID string, offset uint64) string {
+	return fmt.Sprintf(respFullResyncFormat, replID, offset)
+}
 
 func BulkString(data string) string {
 	return fmt.Sprintf(respBulkStringFormat, len(data), data)

@@ -73,10 +73,13 @@ type BLPop struct {
 type InfoCMD struct {
 	Type InfoOption
 }
-type Replconf struct{
-	Port 	int
+type Replconf struct {
+	Port int
 }
-
+type Psync struct {
+	ID     string
+	Offset uint64
+}
 type Incr struct{ Key string }
 type Multi struct{}
 type Exec struct{}
@@ -85,31 +88,31 @@ type Watch struct{ Keys []string }
 type Unwatch struct{}
 type Unknown struct{ Name string }
 
-func (Discard) isCommand() {}
+func (Discard) isCommand()  {}
 func (Replconf) isCommand() {}
-func (Watch) isCommand()   {}
-func (Exec) isCommand()    {}
-func (Incr) isCommand()    {}
-func (Xrange) isCommand()  {}
-func (Xread) isCommand()   {}
-func (Xadd) isCommand()    {}
-func (Ping) isCommand()    {}
-func (Echo) isCommand()    {}
-func (Get) isCommand()     {}
-func (Type) isCommand()    {}
-func (Set) isCommand()     {}
-func (RPush) isCommand()   {}
-func (LPush) isCommand()   {}
-func (LLen) isCommand()    {}
-func (LPop) isCommand()    {}
-func (RPop) isCommand()    {}
-func (LRange) isCommand()  {}
-func (BLPop) isCommand()   {}
-func (Unknown) isCommand() {}
-func (Multi) isCommand()   {}
-func (Unwatch) isCommand() {}
-func (InfoCMD) isCommand() {}
-
+func (Watch) isCommand()    {}
+func (Exec) isCommand()     {}
+func (Incr) isCommand()     {}
+func (Xrange) isCommand()   {}
+func (Xread) isCommand()    {}
+func (Xadd) isCommand()     {}
+func (Ping) isCommand()     {}
+func (Echo) isCommand()     {}
+func (Get) isCommand()      {}
+func (Type) isCommand()     {}
+func (Set) isCommand()      {}
+func (RPush) isCommand()    {}
+func (LPush) isCommand()    {}
+func (LLen) isCommand()     {}
+func (LPop) isCommand()     {}
+func (RPop) isCommand()     {}
+func (LRange) isCommand()   {}
+func (BLPop) isCommand()    {}
+func (Unknown) isCommand()  {}
+func (Multi) isCommand()    {}
+func (Unwatch) isCommand()  {}
+func (InfoCMD) isCommand()  {}
+func (Psync) isCommand()    {}
 
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
@@ -118,12 +121,19 @@ func ParseCommand(parts []string) Command {
 			Type: ReplicOpt,
 		}
 	case "REPLCONF":
-		if parts[1] == "capa"{
+		if parts[1] == "capa" {
 			return Replconf{}
 		}
 		return Replconf{
 			Port: parseInt(parts[2]),
 		}
+		
+	case "PSYNC":
+		return Psync{
+			ID: parts[1],
+			Offset: parseUInt64(parts[2]),
+		}
+
 	case "MULTI":
 		return Multi{}
 

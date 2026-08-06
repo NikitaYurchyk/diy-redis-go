@@ -103,11 +103,18 @@ func (h *CommandHandler) exec(command Command) string {
 		return h.handleIncr(cmd)
 	case InfoCMD:
 		return h.handleInfo(cmd)
+	case Psync:
+		return h.handlePsync(cmd)
 	case Unknown:
 		return fmt.Sprintf(errUnknownCommandFormat, cmd.Name)
 	default:
 		return errUnknownCommand
 	}
+}
+
+
+func (h *CommandHandler) handlePsync(cmd Psync) string{
+	return FullResync(h.store.info.Replication.MasterReplID, h.store.info.Replication.MasterReplOffset)
 }
 
 func (h *CommandHandler) handleReplconf(cmd Replconf) string{

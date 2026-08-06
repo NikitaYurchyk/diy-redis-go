@@ -84,5 +84,5 @@ func parseOptionalInt(parts []string, index int) *int {
 func parseInt(value string) int { result, _ := strconv.Atoi(value); return result }
 
 func parseInt64(value string) int64 { result, _ := strconv.ParseInt(value, 10, 64); return result }
-
+func parseUInt64(value string) uint64 { result, _ := strconv.ParseUint(value, 10, 64); return result }
 func parseFloat(value string) float64 { result, _ := strconv.ParseFloat(value, 64); return result }
