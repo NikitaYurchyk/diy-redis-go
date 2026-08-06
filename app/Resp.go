@@ -57,6 +57,8 @@ const (
 	errUnknownCommandFormat = "-ERR unknown command '%s'\r\n"
 )
 
+
+
 func buildArray(items []string) string {
 	response := fmt.Sprintf(respArrayHeaderFormat, len(items))
 	for _, item := range items {

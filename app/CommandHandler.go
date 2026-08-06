@@ -67,6 +67,8 @@ func (h *CommandHandler) exec(command Command) string {
 	switch cmd := command.(type) {
 	case Xread:
 		return h.handleXread(cmd)
+	case Replconf:
+		return h.handleReplconf(cmd)
 	case Multi:
 		return h.handleMulti(cmd)
 	case Ping:
@@ -106,6 +108,13 @@ func (h *CommandHandler) exec(command Command) string {
 	default:
 		return errUnknownCommand
 	}
+}
+
+func (h *CommandHandler) handleReplconf(cmd Replconf) string{
+	if cmd.Port != 0 {
+		h.store.info.Replication.SlavePort = cmd.Port
+	}
+	return respOK
 }
 
 func (h *CommandHandler) handleGet(cmd Get) string {

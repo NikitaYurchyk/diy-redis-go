@@ -73,6 +73,9 @@ type BLPop struct {
 type InfoCMD struct {
 	Type InfoOption
 }
+type Replconf struct{
+	Port 	int
+}
 
 type Incr struct{ Key string }
 type Multi struct{}
@@ -83,6 +86,7 @@ type Unwatch struct{}
 type Unknown struct{ Name string }
 
 func (Discard) isCommand() {}
+func (Replconf) isCommand() {}
 func (Watch) isCommand()   {}
 func (Exec) isCommand()    {}
 func (Incr) isCommand()    {}
@@ -106,13 +110,20 @@ func (Multi) isCommand()   {}
 func (Unwatch) isCommand() {}
 func (InfoCMD) isCommand() {}
 
+
 func ParseCommand(parts []string) Command {
 	switch strings.ToUpper(parts[0]) {
 	case "INFO":
 		return InfoCMD{
 			Type: ReplicOpt,
 		}
-
+	case "REPLCONF":
+		if parts[1] == "capa"{
+			return Replconf{}
+		}
+		return Replconf{
+			Port: parseInt(parts[2]),
+		}
 	case "MULTI":
 		return Multi{}
 
