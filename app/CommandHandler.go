@@ -112,12 +112,14 @@ func (h *CommandHandler) exec(command Command) string {
 	}
 }
 
-
-func (h *CommandHandler) handlePsync(cmd Psync) string{
-	return FullResync(h.store.info.Replication.MasterReplID, h.store.info.Replication.MasterReplOffset)
+func (h *CommandHandler) handlePsync(cmd Psync) string {
+	resync := FullResync(h.store.info.Replication.MasterReplID, h.store.info.Replication.MasterReplOffset)
+	rdb := RDBFileMessage(EmptyRDB())
+	return resync + string(rdb)
 }
 
-func (h *CommandHandler) handleReplconf(cmd Replconf) string{
+
+func (h *CommandHandler) handleReplconf(cmd Replconf) string {
 	if cmd.Port != 0 {
 		h.store.info.Replication.SlavePort = cmd.Port
 	}
