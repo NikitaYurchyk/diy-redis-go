@@ -104,7 +104,6 @@ func handleReplica(masterHost string, masterPort, listeningPort int, store *Stor
 			fmt.Printf("Error reading command from master: %v\n", err)
 			return
 		}
-		offset += len(buildArray(parts))
 		cmd := ParseCommand(parts)
 
 		if rc, ok := cmd.(Replconf); ok && rc.GetAck {
@@ -113,9 +112,11 @@ func handleReplica(masterHost string, masterPort, listeningPort int, store *Stor
 				fmt.Printf("Error sending ACK to master: %v\n", err)
 				return
 			}
+			offset += len(buildArray(parts))
 			continue
 		}
 
+		offset += len(buildArray(parts))
 		handler.Handle(cmd)
 	}
 }
