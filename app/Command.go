@@ -74,7 +74,8 @@ type InfoCMD struct {
 	Type InfoOption
 }
 type Replconf struct {
-	Port int
+	Port   int
+	GetAck bool
 }
 type Psync struct {
 	ID     string
@@ -121,6 +122,9 @@ func ParseCommand(parts []string) Command {
 			Type: ReplicOpt,
 		}
 	case "REPLCONF":
+		if strings.EqualFold(parts[1], "GETACK") {
+			return Replconf{GetAck: true}
+		}
 		if parts[1] == "capa" {
 			return Replconf{}
 		}

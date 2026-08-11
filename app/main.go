@@ -103,9 +103,19 @@ func handleReplica(masterHost string, masterPort, listeningPort int, store *Stor
 			fmt.Printf("Error reading command from master: %v\n", err)
 			return
 		}
-		handler.Handle(ParseCommand(parts))
-	}
+		cmd := ParseCommand(parts)
 
+		if rc, ok := cmd.(Replconf); ok && rc.GetAck {
+			ack := buildArray([]string{"REPLCONF", "ACK", "0"})
+			if _, err := conn.Write([]byte(ack)); err != nil {
+				fmt.Printf("Error sending ACK to master: %v\n", err)
+				return
+			}
+			continue
+		}
+
+		handler.Handle(cmd)
+	}
 }
 
 func main() {
