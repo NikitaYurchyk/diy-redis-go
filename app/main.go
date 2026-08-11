@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"strconv"
 	"strings"
@@ -29,7 +30,7 @@ func handleClient(conn net.Conn, store *Store) {
 			}
 			return
 		}
-		
+
 		cmd := ParseCommand(parts)
 
 		if _, err := writer.WriteString(handler.Handle(cmd)); err != nil {
@@ -48,7 +49,7 @@ func handleClient(conn net.Conn, store *Store) {
 	}
 }
 
-func handleReplica(masterHost string, masterPort, listeningPort int) {
+func handleReplica(masterHost string, masterPort, listeningPort int, store *Store) {
 	addr := net.JoinHostPort(masterHost, strconv.Itoa(masterPort))
 
 	conn, err := net.Dial("tcp", addr)
@@ -80,8 +81,33 @@ func handleReplica(masterHost string, masterPort, listeningPort int) {
 		}
 		fmt.Printf("Master replied to %s: %s\n", step[0], reply)
 	}
+	rdbHeader, err := readLine(reader)
+	if err != nil {
+		fmt.Printf("Error reading RDB header from master: %v\n", err)
+		return
+	}
+	rdbLen, err := strconv.Atoi(strings.TrimPrefix(rdbHeader, "$"))
+	if err != nil {
+		fmt.Printf("Error parsing RDB length %q: %v\n", rdbHeader, err)
+		return
+	}
+	if _, err := io.CopyN(io.Discard, reader, int64(rdbLen)); err != nil {
+		fmt.Printf("Error reading RDB body from master: %v\n", err)
+		return
+	}
+
+	handler := &CommandHandler{store: store}
+	for {
+		parts, err := ParseArray(reader)
+		if err != nil {
+			fmt.Printf("Error reading command from master: %v\n", err)
+			return
+		}
+		handler.Handle(ParseCommand(parts))
+	}
 
 }
+
 func main() {
 	port := flag.Int("port", 6379, "port to listen on")
 	replicaOf := flag.String("replicaof", "", "master to replicate, as \"<host> <port>\"")
@@ -111,7 +137,7 @@ func main() {
 		store.info.Replication.Role = RoleSlave
 		store.info.Replication.MasterHost = fields[0]
 		store.info.Replication.MasterPort = masterPort
-		go handleReplica(store.info.Replication.MasterHost, store.info.Replication.MasterPort, *port)
+		go handleReplica(store.info.Replication.MasterHost, store.info.Replication.MasterPort, *port, store)
 	}
 
 	for {
