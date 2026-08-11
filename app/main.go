@@ -33,6 +33,11 @@ func handleClient(conn net.Conn, store *Store) {
 
 		cmd := ParseCommand(parts)
 
+		if rc, ok := cmd.(Replconf); ok && rc.Ack {
+			store.UpdateReplicaAck(conn, rc.AckOffset)
+			continue
+		}
+
 		if _, err := writer.WriteString(handler.Handle(cmd)); err != nil {
 			fmt.Printf("Error writing to %s: %v\n", conn.RemoteAddr(), err)
 			return

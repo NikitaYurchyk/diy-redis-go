@@ -63,6 +63,44 @@ func (s *Store) AddReplica(conn net.Conn, port int) {
 	s.replicas = append(s.replicas, &ReplicaState{Conn: conn, Port: port})
 }
 
+func (s *Store) UpdateReplicaAck(conn net.Conn, offset uint64) {
+	s.replicasMu.Lock()
+	defer s.replicasMu.Unlock()
+	for _, r := range s.replicas {
+		if r.Conn == conn {
+			r.Offset = offset
+			return
+		}
+	}
+}
+
+func (s *Store) ReplicaCount() int {
+	s.replicasMu.Lock()
+	defer s.replicasMu.Unlock()
+	return len(s.replicas)
+}
+
+func (s *Store) CountAcked(target uint64) int {
+	s.replicasMu.Lock()
+	defer s.replicasMu.Unlock()
+	count := 0
+	for _, r := range s.replicas {
+		if r.Offset >= target {
+			count++
+		}
+	}
+	return count
+}
+
+func (s *Store) SendGetAck() {
+	s.replicasMu.Lock()
+	defer s.replicasMu.Unlock()
+	msg := []byte(buildArray([]string{"REPLCONF", "GETACK", "*"}))
+	for _, r := range s.replicas {
+		r.Conn.Write(msg)
+	}
+}
+
 
 func NewStore() *Store {
 	return &Store{

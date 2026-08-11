@@ -111,6 +111,8 @@ func (h *CommandHandler) exec(command Command) string {
 		return h.handlePsync(cmd)
 	case Unknown:
 		return fmt.Sprintf(errUnknownCommandFormat, cmd.Name)
+	case Wait:
+		return h.handleWait(cmd)
 	default:
 		return errUnknownCommand
 	}
@@ -121,9 +123,6 @@ func (h *CommandHandler) handlePsync(cmd Psync) string {
 	rdb := RDBFileMessage(EmptyRDB())
 	return resync + string(rdb)
 }
-
-
-
 
 func (h *CommandHandler) handleGet(cmd Get) string {
 	h.store.mu.Lock()
@@ -623,7 +622,7 @@ func (h *CommandHandler) incrVersion(key string) {
 }
 
 func (h *CommandHandler) Propagate(args ...string) {
-	if h.store.info.Replication.Role == RoleMaster{
+	if h.store.info.Replication.Role == RoleMaster {
 		h.store.replicasMu.Lock()
 		defer h.store.replicasMu.Unlock()
 		msg := []byte(buildArray(args))
@@ -634,6 +633,31 @@ func (h *CommandHandler) Propagate(args ...string) {
 			}
 		}
 		h.store.replicas = alive
+		h.store.info.Replication.MasterReplOffset += uint64(len(msg))
+	}
+}
+
+func (h *CommandHandler) handleWait(cmd Wait) string {
+	target := h.store.info.Replication.MasterReplOffset
+	if target == 0 {
+		return fmt.Sprintf(respIntegerFormat, h.store.ReplicaCount())
+	}
+
+	h.store.SendGetAck()
+
+	deadline := time.After(time.Duration(cmd.Timeout) * time.Millisecond)
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		if count := h.store.CountAcked(target); count >= cmd.NumReplicas {
+			return fmt.Sprintf(respIntegerFormat, count)
+		}
+		select {
+		case <-deadline:
+			return fmt.Sprintf(respIntegerFormat, h.store.CountAcked(target))
+		case <-ticker.C:
+		}
 	}
 }
 

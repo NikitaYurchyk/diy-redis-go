@@ -74,12 +74,18 @@ type InfoCMD struct {
 	Type InfoOption
 }
 type Replconf struct {
-	Port   int
-	GetAck bool
+	Port      int
+	GetAck    bool
+	Ack       bool
+	AckOffset uint64
 }
 type Psync struct {
 	ID     string
 	Offset uint64
+}
+type Wait struct {
+	NumReplicas int
+	Timeout     int
 }
 type Incr struct{ Key string }
 type Multi struct{}
@@ -113,6 +119,7 @@ func (Unknown) isCommand()  {}
 func (Multi) isCommand()    {}
 func (Unwatch) isCommand()  {}
 func (InfoCMD) isCommand()  {}
+func (Wait) isCommand()     {}
 func (Psync) isCommand()    {}
 
 func ParseCommand(parts []string) Command {
@@ -125,6 +132,9 @@ func ParseCommand(parts []string) Command {
 		if strings.EqualFold(parts[1], "GETACK") {
 			return Replconf{GetAck: true}
 		}
+		if strings.EqualFold(parts[1], "ACK") {
+			return Replconf{Ack: true, AckOffset: parseUInt64(parts[2])}
+		}
 		if parts[1] == "capa" {
 			return Replconf{}
 		}
@@ -136,6 +146,12 @@ func ParseCommand(parts []string) Command {
 		return Psync{
 			ID: parts[1],
 			Offset: parseUInt64(parts[2]),
+		}
+
+	case "WAIT":
+		return Wait{
+			NumReplicas: parseInt(parts[1]),
+			Timeout:     parseInt(parts[2]),
 		}
 
 	case "MULTI":
