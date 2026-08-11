@@ -22,11 +22,8 @@ type Replication struct {
 	ReplBacklogSize            uint64
 	ReplBacklogFirstByteOffset uint64
 	ReplBacklogHistlen         uint64
-
 	MasterHost string
 	MasterPort int
-
-	SlavePort int
 }
 
 func (r *Replication) RespReplication() string {

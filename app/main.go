@@ -29,14 +29,21 @@ func handleClient(conn net.Conn, store *Store) {
 			}
 			return
 		}
+		
+		cmd := ParseCommand(parts)
 
-		if _, err := writer.WriteString(handler.Handle(ParseCommand(parts))); err != nil {
+		if _, err := writer.WriteString(handler.Handle(cmd)); err != nil {
 			fmt.Printf("Error writing to %s: %v\n", conn.RemoteAddr(), err)
 			return
 		}
+
 		if err := writer.Flush(); err != nil {
 			fmt.Printf("Error flushing to %s: %v\n", conn.RemoteAddr(), err)
 			return
+		}
+
+		if _, ok := cmd.(Psync); ok {
+			store.AddReplica(conn, handler.replicaPort)
 		}
 	}
 }

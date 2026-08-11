@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net"
 	"sync"
 	"time"
 )
@@ -46,7 +47,22 @@ type Store struct {
 	streamWaiters map[string][]*streamWaiter
 	versions      map[string]uint64
 	info          *Info
+	replicas      []*ReplicaState
+	replicasMu    sync.Mutex
 }
+
+type ReplicaState struct {
+	Conn   net.Conn
+	Port   int
+	Offset uint64
+}
+
+func (s *Store) AddReplica(conn net.Conn, port int) {
+	s.replicasMu.Lock()
+	defer s.replicasMu.Unlock()
+	s.replicas = append(s.replicas, &ReplicaState{Conn: conn, Port: port})
+}
+
 
 func NewStore() *Store {
 	return &Store{

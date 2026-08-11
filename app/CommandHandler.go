@@ -12,10 +12,11 @@ type Transaction struct {
 	queue  []Command
 }
 type CommandHandler struct {
-	store   *Store
-	tx      Transaction
-	isExec  bool
-	watched map[string]uint64
+	store       *Store
+	tx          Transaction
+	isExec      bool
+	watched     map[string]uint64
+	replicaPort int
 }
 
 func (h *CommandHandler) Handle(command Command) string {
@@ -68,7 +69,10 @@ func (h *CommandHandler) exec(command Command) string {
 	case Xread:
 		return h.handleXread(cmd)
 	case Replconf:
-		return h.handleReplconf(cmd)
+		if cmd.Port != 0 {
+			h.replicaPort = cmd.Port
+		}
+		return respOK
 	case Multi:
 		return h.handleMulti(cmd)
 	case Ping:
@@ -119,12 +123,7 @@ func (h *CommandHandler) handlePsync(cmd Psync) string {
 }
 
 
-func (h *CommandHandler) handleReplconf(cmd Replconf) string {
-	if cmd.Port != 0 {
-		h.store.info.Replication.SlavePort = cmd.Port
-	}
-	return respOK
-}
+
 
 func (h *CommandHandler) handleGet(cmd Get) string {
 	h.store.mu.Lock()
@@ -179,6 +178,7 @@ func (h *CommandHandler) handleSet(cmd Set) string {
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
 	h.incrVersion(cmd.Key)
+	h.Propagate("SET", cmd.Key, cmd.Value)
 	return respOK
 }
 
@@ -203,6 +203,7 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
+	h.Propagate(append([]string{"RPUSH", cmd.Key}, cmd.Values...)...)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
@@ -364,6 +365,7 @@ func (h *CommandHandler) handleXadd(cmd Xadd) string {
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
 	h.notifyStreamWaiters(cmd.Key, newEntry)
+	h.Propagate(append([]string{"XADD", cmd.Key, id.String()}, cmd.Fields...)...)
 	return BulkString(id.String())
 }
 
@@ -377,6 +379,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
+		h.Propagate("INCR", cmd.Key)
 		return respOne
 	}
 
@@ -390,6 +393,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		entry.Value = StringValue{Value: strconv.FormatInt(n, 10)}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
+		h.Propagate("INCR", cmd.Key)
 		return fmt.Sprintf(respIntegerFormat, n)
 	default:
 		return errNotAnInteger
@@ -415,6 +419,7 @@ func (h *CommandHandler) handleLPush(cmd LPush) string {
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
+	h.Propagate(append([]string{"LPUSH", cmd.Key}, cmd.Values...)...)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
@@ -433,11 +438,15 @@ func (h *CommandHandler) handleLLen(cmd LLen) string {
 	return wrongType
 }
 
-func (h *CommandHandler) handleLPop(cmd LPop) string { return h.handlePop(cmd.Key, cmd.Count, true) }
+func (h *CommandHandler) handleLPop(cmd LPop) string {
+	return h.handlePop("LPOP", cmd.Key, cmd.Count, true)
+}
 
-func (h *CommandHandler) handleRPop(cmd RPop) string { return h.handlePop(cmd.Key, cmd.Count, false) }
+func (h *CommandHandler) handleRPop(cmd RPop) string {
+	return h.handlePop("RPOP", cmd.Key, cmd.Count, false)
+}
 
-func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string {
+func (h *CommandHandler) handlePop(name, key string, count *int, fromLeft bool) string {
 	h.store.mu.Lock()
 	defer h.store.mu.Unlock()
 
@@ -466,6 +475,7 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 		entry.Value = list
 		h.store.db[key] = entry
 		h.incrVersion(key)
+		h.Propagate(name, key)
 		return BulkString(item)
 	}
 
@@ -487,6 +497,7 @@ func (h *CommandHandler) handlePop(key string, count *int, fromLeft bool) string
 	h.store.db[key] = entry
 	if len(items) > 0 {
 		h.incrVersion(key)
+		h.Propagate(name, key, strconv.Itoa(*count))
 	}
 	return buildArray(items)
 }
@@ -529,6 +540,7 @@ func (h *CommandHandler) handleBLPop(cmd BLPop) string {
 			h.store.db[cmd.Key] = entry
 			h.incrVersion(cmd.Key)
 			h.store.mu.Unlock()
+			h.Propagate("LPOP", cmd.Key)
 			return popResponse(cmd.Key, item)
 		}
 	}
@@ -574,6 +586,7 @@ func (h *CommandHandler) notifyWaiters(key string) {
 		entry.Value = list
 		h.store.db[key] = entry
 		h.incrVersion(key)
+		h.Propagate("LPOP", key)
 		w.result <- popResult{key: key, item: item}
 		return
 	}
@@ -607,6 +620,21 @@ func (h *CommandHandler) removeWaiterLocked(w *waiter) {
 
 func (h *CommandHandler) incrVersion(key string) {
 	h.store.versions[key]++
+}
+
+func (h *CommandHandler) Propagate(args ...string) {
+	if h.store.info.Replication.Role == RoleMaster{
+		h.store.replicasMu.Lock()
+		defer h.store.replicasMu.Unlock()
+		msg := []byte(buildArray(args))
+		alive := h.store.replicas[:0]
+		for _, r := range h.store.replicas {
+			if _, err := r.Conn.Write(msg); err == nil {
+				alive = append(alive, r)
+			}
+		}
+		h.store.replicas = alive
+	}
 }
 
 func (h *CommandHandler) notifyStreamWaiters(key string, entry StreamEntry) {
