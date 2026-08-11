@@ -97,16 +97,18 @@ func handleReplica(masterHost string, masterPort, listeningPort int, store *Stor
 	}
 
 	handler := &CommandHandler{store: store}
+	offset := 0
 	for {
 		parts, err := ParseArray(reader)
 		if err != nil {
 			fmt.Printf("Error reading command from master: %v\n", err)
 			return
 		}
+		offset += len(buildArray(parts))
 		cmd := ParseCommand(parts)
 
 		if rc, ok := cmd.(Replconf); ok && rc.GetAck {
-			ack := buildArray([]string{"REPLCONF", "ACK", "0"})
+			ack := buildArray([]string{"REPLCONF", "ACK", strconv.Itoa(offset)})
 			if _, err := conn.Write([]byte(ack)); err != nil {
 				fmt.Printf("Error sending ACK to master: %v\n", err)
 				return
