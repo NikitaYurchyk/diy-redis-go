@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -129,7 +131,22 @@ func handleReplica(masterHost string, masterPort, listeningPort int, store *Stor
 func main() {
 	port := flag.Int("port", 6379, "port to listen on")
 	replicaOf := flag.String("replicaof", "", "master to replicate, as \"<host> <port>\"")
+	dir := flag.String("dir", "", "directory to serve files from")
+	dbfilename := flag.String("dbfilename", "", "filename to store replica information")
 	flag.Parse()
+	path := filepath.Join(*dir, *dbfilename)
+	err := os.MkdirAll(*dir, 0777)
+	if err != nil {
+		fmt.Printf("Error creating directory %s: %v\n", *dir, err)
+	}
+
+	f, err := os.Create(path)
+
+	if err != nil {
+		fmt.Printf("Error creating file %s: %v\n", path, err)
+	}
+	defer f.Close()
+
 	addr := fmt.Sprintf(":%d", *port)
 
 	listener, err := net.Listen("tcp", addr)
@@ -140,8 +157,10 @@ func main() {
 
 	defer listener.Close()
 
-	store := NewStore()
-	store.info = InitInfo()
+	store := NewStore(map[string]string{
+		"dir":        *dir,
+		"dbfilename": *dbfilename,
+	})
 	if *replicaOf != "" {
 		fields := strings.Fields(*replicaOf)
 		if len(fields) != 2 {
@@ -151,7 +170,7 @@ func main() {
 		if err != nil {
 			panic("--replicaof port is not a number: " + fields[1])
 		}
-
+		store.file = f
 		store.info.Replication.Role = RoleSlave
 		store.info.Replication.MasterHost = fields[0]
 		store.info.Replication.MasterPort = masterPort

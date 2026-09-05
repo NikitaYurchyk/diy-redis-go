@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 )
 
 type RoleType string
@@ -16,14 +17,14 @@ type Replication struct {
 	Role                       RoleType
 	ConnectedSlaves            uint64
 	MasterReplID               string
-	MasterReplOffset           uint64
+	MasterReplOffset           atomic.Uint64
 	SecondReplOffset           int64
 	ReplBacklogActive          uint64
 	ReplBacklogSize            uint64
 	ReplBacklogFirstByteOffset uint64
 	ReplBacklogHistlen         uint64
-	MasterHost string
-	MasterPort int
+	MasterHost                 string
+	MasterPort                 int
 }
 
 func (r *Replication) RespReplication() string {
@@ -32,7 +33,7 @@ func (r *Replication) RespReplication() string {
 		fmt.Sprintf("role:%s", r.Role),
 		fmt.Sprintf("connected_slaves:%d", r.ConnectedSlaves),
 		fmt.Sprintf("master_replid:%s", r.MasterReplID),
-		fmt.Sprintf("master_repl_offset:%d", r.MasterReplOffset),
+		fmt.Sprintf("master_repl_offset:%d", r.MasterReplOffset.Load()),
 		fmt.Sprintf("second_repl_offset:%d", r.SecondReplOffset),
 		fmt.Sprintf("repl_backlog_active:%d", r.ReplBacklogActive),
 		fmt.Sprintf("repl_backlog_size:%d", r.ReplBacklogSize),

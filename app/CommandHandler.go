@@ -79,6 +79,8 @@ func (h *CommandHandler) exec(command Command) string {
 		return respPong
 	case Echo:
 		return BulkString(cmd.Message)
+	case Config:
+		return h.handleConfig(cmd)
 	case Get:
 		return h.handleGet(cmd)
 	case Type:
@@ -118,8 +120,20 @@ func (h *CommandHandler) exec(command Command) string {
 	}
 }
 
+func (h *CommandHandler) handleConfig(cmd Config) string {
+	if cmd.commandType != GetType {
+		return errUnknownCommand
+	}
+
+	value, ok := h.store.config[cmd.param]
+	if !ok {
+		return respEmptyArray
+	}
+	return buildArray([]string{cmd.param, value})
+}
+
 func (h *CommandHandler) handlePsync(cmd Psync) string {
-	resync := FullResync(h.store.info.Replication.MasterReplID, h.store.info.Replication.MasterReplOffset)
+	resync := FullResync(h.store.info.Replication.MasterReplID, h.store.info.Replication.MasterReplOffset.Load())
 	rdb := RDBFileMessage(EmptyRDB())
 	return resync + string(rdb)
 }
@@ -177,7 +191,7 @@ func (h *CommandHandler) handleSet(cmd Set) string {
 	defer h.store.mu.Unlock()
 	h.store.db[cmd.Key] = Entry{Value: StringValue{Value: cmd.Value}, Expiry: cmd.Expiry}
 	h.incrVersion(cmd.Key)
-	h.Propagate("SET", cmd.Key, cmd.Value)
+	h.store.Propagate("SET", cmd.Key, cmd.Value)
 	return respOK
 }
 
@@ -202,7 +216,7 @@ func (h *CommandHandler) handleRPush(cmd RPush) string {
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
-	h.Propagate(append([]string{"RPUSH", cmd.Key}, cmd.Values...)...)
+	h.store.Propagate(append([]string{"RPUSH", cmd.Key}, cmd.Values...)...)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
@@ -364,7 +378,7 @@ func (h *CommandHandler) handleXadd(cmd Xadd) string {
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
 	h.notifyStreamWaiters(cmd.Key, newEntry)
-	h.Propagate(append([]string{"XADD", cmd.Key, id.String()}, cmd.Fields...)...)
+	h.store.Propagate(append([]string{"XADD", cmd.Key, id.String()}, cmd.Fields...)...)
 	return BulkString(id.String())
 }
 
@@ -378,7 +392,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		entry = Entry{Value: StringValue{Value: "1"}, Expiry: nil}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
-		h.Propagate("INCR", cmd.Key)
+		h.store.Propagate("INCR", cmd.Key)
 		return respOne
 	}
 
@@ -392,7 +406,7 @@ func (h *CommandHandler) handleIncr(cmd Incr) string {
 		entry.Value = StringValue{Value: strconv.FormatInt(n, 10)}
 		h.store.db[cmd.Key] = entry
 		h.incrVersion(cmd.Key)
-		h.Propagate("INCR", cmd.Key)
+		h.store.Propagate("INCR", cmd.Key)
 		return fmt.Sprintf(respIntegerFormat, n)
 	default:
 		return errNotAnInteger
@@ -418,7 +432,7 @@ func (h *CommandHandler) handleLPush(cmd LPush) string {
 	entry.Value = list
 	h.store.db[cmd.Key] = entry
 	h.incrVersion(cmd.Key)
-	h.Propagate(append([]string{"LPUSH", cmd.Key}, cmd.Values...)...)
+	h.store.Propagate(append([]string{"LPUSH", cmd.Key}, cmd.Values...)...)
 	h.notifyWaiters(cmd.Key)
 	return fmt.Sprintf(respIntegerFormat, len(list.Values))
 }
@@ -474,7 +488,7 @@ func (h *CommandHandler) handlePop(name, key string, count *int, fromLeft bool) 
 		entry.Value = list
 		h.store.db[key] = entry
 		h.incrVersion(key)
-		h.Propagate(name, key)
+		h.store.Propagate(name, key)
 		return BulkString(item)
 	}
 
@@ -496,7 +510,7 @@ func (h *CommandHandler) handlePop(name, key string, count *int, fromLeft bool) 
 	h.store.db[key] = entry
 	if len(items) > 0 {
 		h.incrVersion(key)
-		h.Propagate(name, key, strconv.Itoa(*count))
+		h.store.Propagate(name, key, strconv.Itoa(*count))
 	}
 	return buildArray(items)
 }
@@ -539,7 +553,7 @@ func (h *CommandHandler) handleBLPop(cmd BLPop) string {
 			h.store.db[cmd.Key] = entry
 			h.incrVersion(cmd.Key)
 			h.store.mu.Unlock()
-			h.Propagate("LPOP", cmd.Key)
+			h.store.Propagate("LPOP", cmd.Key)
 			return popResponse(cmd.Key, item)
 		}
 	}
@@ -585,7 +599,7 @@ func (h *CommandHandler) notifyWaiters(key string) {
 		entry.Value = list
 		h.store.db[key] = entry
 		h.incrVersion(key)
-		h.Propagate("LPOP", key)
+		h.store.Propagate("LPOP", key)
 		w.result <- popResult{key: key, item: item}
 		return
 	}
@@ -621,24 +635,8 @@ func (h *CommandHandler) incrVersion(key string) {
 	h.store.versions[key]++
 }
 
-func (h *CommandHandler) Propagate(args ...string) {
-	if h.store.info.Replication.Role == RoleMaster {
-		h.store.replicasMu.Lock()
-		defer h.store.replicasMu.Unlock()
-		msg := []byte(buildArray(args))
-		alive := h.store.replicas[:0]
-		for _, r := range h.store.replicas {
-			if _, err := r.Conn.Write(msg); err == nil {
-				alive = append(alive, r)
-			}
-		}
-		h.store.replicas = alive
-		h.store.info.Replication.MasterReplOffset += uint64(len(msg))
-	}
-}
-
 func (h *CommandHandler) handleWait(cmd Wait) string {
-	target := h.store.info.Replication.MasterReplOffset
+	target := h.store.info.Replication.MasterReplOffset.Load()
 	if target == 0 {
 		return fmt.Sprintf(respIntegerFormat, h.store.ReplicaCount())
 	}

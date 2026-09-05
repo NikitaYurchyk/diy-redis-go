@@ -9,6 +9,117 @@ import (
 	"time"
 )
 
+func ParseCommand(parts []string) Command {
+	switch strings.ToUpper(parts[0]) {
+	case "INFO":
+		return InfoCMD{
+			Type: ReplicOpt,
+		}
+	case "REPLCONF":
+		if strings.EqualFold(parts[1], "GETACK") {
+			return Replconf{GetAck: true}
+		}
+		if strings.EqualFold(parts[1], "ACK") {
+			return Replconf{Ack: true, AckOffset: parseUInt64(parts[2])}
+		}
+		if parts[1] == "capa" {
+			return Replconf{}
+		}
+		return Replconf{
+			Port: parseInt(parts[2]),
+		}
+
+	case "PSYNC":
+		return Psync{
+			ID:     parts[1],
+			Offset: parseUInt64(parts[2]),
+		}
+
+	case "WAIT":
+		return Wait{
+			NumReplicas: parseInt(parts[1]),
+			Timeout:     parseInt(parts[2]),
+		}
+
+	case "MULTI":
+		return Multi{}
+
+	case "EXEC":
+		return Exec{}
+
+	case "DISCARD":
+		return Discard{}
+
+	case "INCR":
+		return Incr{Key: parts[1]}
+
+	case "XADD":
+		return Xadd{Key: parts[1], ID: parts[2], Fields: parts[3:]}
+
+	case "XRANGE":
+		return Xrange{Key: parts[1], BegID: parts[2], EndID: parts[3]}
+
+	case "XREAD":
+		if strings.EqualFold(parts[1], "BLOCK") {
+			streams := createArrOfStreams(parts[4:])
+			return Xread{Streams: streams, Block: time.Duration(parseInt64(parts[2])) * time.Millisecond}
+
+		}
+		streams := createArrOfStreams(parts[2:])
+		return Xread{Streams: streams, Block: -1}
+
+	case "UNWATCH":
+		return Unwatch{}
+
+	case "WATCH":
+		return Watch{parts[1:]}
+
+	case "PING":
+		return Ping{}
+
+	case "ECHO":
+		return Echo{Message: parts[1]}
+
+	case "GET":
+		return Get{Key: parts[1]}
+
+	case "TYPE":
+		return Type{Key: parts[1]}
+
+	case "SET":
+		return Set{Key: parts[1], Value: parts[2], Expiry: parseExpiry(parts)}
+
+	case "RPUSH":
+		return RPush{Key: parts[1], Values: parts[2:]}
+
+	case "LPUSH":
+		return LPush{Key: parts[1], Values: parts[2:]}
+
+	case "LLEN":
+		return LLen{Key: parts[1]}
+
+	case "LPOP":
+		return LPop{Key: parts[1], Count: parseOptionalInt(parts, 2)}
+
+	case "RPOP":
+		return RPop{Key: parts[1], Count: parseOptionalInt(parts, 2)}
+
+	case "LRANGE":
+		return LRange{Key: parts[1], Start: parseInt(parts[2]), End: parseInt(parts[3])}
+
+	case "BLPOP":
+		return BLPop{Key: parts[1], Timeout: parseFloat(parts[len(parts)-1])}
+	case "CONFIG":
+		if len(parts) < 3 {
+			return Unknown{Name: parts[0]}
+		}
+		return Config{commandType: ConfigType(strings.ToLower(parts[1])), param: strings.ToLower(parts[2])}
+
+	default:
+		return Unknown{Name: parts[0]}
+	}
+}
+
 func ParseArray(reader *bufio.Reader) ([]string, error) {
 	line, err := readLine(reader)
 	if err != nil {

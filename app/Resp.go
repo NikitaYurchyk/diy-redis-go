@@ -60,6 +60,7 @@ const (
 )
 
 const emptyRDBHex = "524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000ff00f06e3bfec0ff5aa2"
+
 func EmptyRDB() []byte {
 	b, _ := hex.DecodeString(emptyRDBHex)
 	return b
@@ -95,6 +96,6 @@ func readLine(reader *bufio.Reader) (string, error) {
 }
 
 func RDBFileMessage(data []byte) []byte {
-    header := fmt.Sprintf("$%d\r\n", len(data))
-    return append([]byte(header), data...)
+	header := fmt.Sprintf("$%d\r\n", len(data))
+	return append([]byte(header), data...)
 }
