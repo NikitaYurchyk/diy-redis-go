@@ -7,12 +7,8 @@ import (
 	"strings"
 )
 
-// Every raw RESP byte sequence lives here.
-
-// crlf terminates every RESP line, on the way in and on the way out.
 const crlf = "\r\n"
 
-// Fixed replies.
 const (
 	respOK     = "+OK\r\n"
 	respPong   = "+PONG\r\n"
@@ -36,7 +32,6 @@ const (
 	respTypeStream = "+stream\r\n"
 )
 
-// Errors.
 const (
 	wrongType         = "-WRONGTYPE Operation against a key holding the wrong kind of value\r\n"
 	errNotAnInteger   = "-ERR value is not an integer or out of range\r\n"
@@ -48,7 +43,6 @@ const (
 	errWatchInMulti   = "-ERR WATCH inside MULTI is not allowed\r\n"
 )
 
-// Format strings for replies whose contents vary.
 const (
 	respBulkStringFormat  = "$%d\r\n%s\r\n"
 	respIntegerFormat     = ":%d\r\n"

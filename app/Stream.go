@@ -19,7 +19,6 @@ type StreamID struct {
 	Seq    int64
 }
 
-// String renders the wire form, "<millis>-<seq>".
 func (id StreamID) String() string {
 	return fmt.Sprintf("%d-%d", id.Millis, id.Seq)
 }
